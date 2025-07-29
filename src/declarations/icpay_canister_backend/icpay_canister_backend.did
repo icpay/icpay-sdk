@@ -1,0 +1,93 @@
+type Account = record {
+  account_canister_id : nat64;
+  platform_fee_percentage : nat8;
+  subaccount : opt blob;
+  wallet_address : text;
+  platform_fee_fixed : opt nat;
+  is_active : bool;
+};
+type AccountRecord = record { account_canister_id : nat64; account : Account };
+type CanisterMetrics = record {
+  total_accounts : nat32;
+  cycles_balance : nat64;
+  controllers : vec principal;
+  is_healthy : bool;
+  last_update_timestamp : nat64;
+  active_accounts : nat32;
+  memory_size_bytes : nat64;
+  total_transactions : nat32;
+  platform_wallet : text;
+};
+type LedgerAccount = record { owner : principal; subaccount : opt blob };
+type LedgerTransactionNotification = record {
+  block_index : nat64;
+  ledger_canister_id : text;
+};
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
+type Transaction = record {
+  id : text;
+  status : TransactionStatus;
+  account_canister_id : nat64;
+  platform_fee_amount : nat;
+  recipient : LedgerAccount;
+  index_to_account : opt nat64;
+  timestamp_to_account : opt nat64;
+  receiver_amount : nat;
+  timestamp : nat64;
+  index_received : opt nat64;
+  sender_principal_id : text;
+  timestamp_to_platform : opt nat64;
+  ledger_canister_id : text;
+  timestamp_received : opt nat64;
+  amount : nat;
+  index_to_platform : opt nat64;
+};
+type TransactionFilter = record {
+  from_timestamp : opt nat64;
+  status : opt TransactionStatus;
+  account_canister_id : opt nat64;
+  offset : opt nat32;
+  limit : opt nat32;
+  to_timestamp : opt nat64;
+  ledger_canister_id : opt text;
+};
+type TransactionResult = record {
+  transactions : vec Transaction;
+  total_count : nat32;
+  has_more : bool;
+};
+type TransactionStatus = variant {
+  Failed : text;
+  Processed;
+  Received;
+  Completed;
+  Pending;
+};
+type WithdrawRequest = record {
+  recipient : text;
+  ledger_canister_id : text;
+  amount : nat;
+};
+service : () -> {
+  add_account : (nat64, Account) -> (Result);
+  get_account : (nat64) -> (opt Account) query;
+  get_account_transactions : (nat64, opt nat32, opt nat32) -> (
+      TransactionResult,
+    ) query;
+  get_canister_info : () -> (CanisterMetrics);
+  get_controller : () -> (principal) query;
+  get_ledger_transactions : (text, opt nat32, opt nat32) -> (
+      TransactionResult,
+    ) query;
+  get_platform_wallet : () -> (text) query;
+  get_transaction : (text) -> (opt Transaction) query;
+  get_transactions : (TransactionFilter) -> (TransactionResult) query;
+  list_accounts : () -> (vec AccountRecord) query;
+  notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
+  remove_account : (nat64) -> (Result);
+  set_controller : (principal) -> (Result);
+  set_platform_wallet : (text) -> (Result);
+  update_account : (nat64, Account) -> (Result);
+  withdraw_funds : (WithdrawRequest) -> (Result_1);
+}
