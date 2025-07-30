@@ -5,12 +5,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && pnpm run copy-declarations",
+    "copy-declarations": "mkdir -p dist && cp -r src/declarations dist/",
+    "postbuild": "pnpm run copy-declarations",
     "dev": "tsc --watch",
     "test": "jest",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "prepare": "npm run build"
+    "prepare": "pnpm run build"
   },
   "keywords": [
     "icpay",
