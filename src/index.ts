@@ -17,6 +17,7 @@ import axios, { AxiosInstance } from 'axios';
 import { HttpAgent, Actor } from '@dfinity/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
+import { idlFactory as icpLedgerIdl } from './declarations/icp-ledger/icp-ledger.did.js';
 import { Principal } from '@dfinity/principal';
 import { toAccountIdentifier } from './utils'; // We'll add this helper
 
@@ -492,21 +493,41 @@ export class Icpay {
     memo?: Uint8Array,
     host?: string
   ): Promise<any> {
+    console.log('[ICPay SDK] sendIcpLedgerTransfer called with:', {
+      ledgerCanisterId,
+      accountIdentifierLength: accountIdentifier.length,
+      amount: amount.toString(),
+      memo: memo ? Array.from(memo) : undefined,
+      host
+    });
+
     let actor;
     if (this.actorProvider) {
-      actor = this.actorProvider(ledgerCanisterId, ledgerIdl);
+      console.log('[ICPay SDK] Using actorProvider');
+      actor = this.actorProvider(ledgerCanisterId, icpLedgerIdl);
     } else {
+      console.log('[ICPay SDK] Creating actor with HttpAgent');
       // Attach the wallet's identity for signing
       const identity = this.wallet.getIdentity?.() || this.externalWallet?.identity || undefined;
       const agent = new HttpAgent({ host: host || this.icHost, ...(identity ? { identity } : {}) });
-      actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
+      actor = Actor.createActor(icpLedgerIdl, { agent, canisterId: ledgerCanisterId });
     }
-    // ICP ledger expects account identifier as a blob
-    return await actor.account_transfer({
-      to: accountIdentifier,
+
+    console.log('[ICPay SDK] Actor created, checking methods:', Object.keys(actor));
+
+    // Use ICP ledger's account_transfer method with account identifier
+    const transferArgs = {
+      to: Array.from(accountIdentifier),
       amount,
-      ...(memo ? { memo } : {}),
-    });
+      fee: BigInt(10000), // Standard ICP transfer fee
+      memo: memo ? BigInt(memo[0] || 0) : BigInt(0),
+      from_subaccount: [],
+      created_at_time: [],
+    };
+
+    console.log('[ICPay SDK] Calling account_transfer with args:', transferArgs);
+
+    return await actor.account_transfer(transferArgs);
   }
 
   /**
@@ -556,11 +577,11 @@ export class Icpay {
 
       // Get all transactions and filter by ID
       const result = await (actor as any).get_transactions({
-        account_canister_id: null,
-        ledger_canister_id: null,
-        from_timestamp: null,
-        to_timestamp: null,
-        status: null,
+        account_canister_id: [], // Use empty array instead of null
+        ledger_canister_id: [], // Use empty array instead of null
+        from_timestamp: [], // Use empty array instead of null
+        to_timestamp: [], // Use empty array instead of null
+        status: [], // Use empty array instead of null
         limit: 100,
         offset: 0
       });
