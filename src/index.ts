@@ -268,11 +268,11 @@ export class Icpay {
 
       let transferResult;
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
-        // ICP Ledger: convert principal to AccountIdentifier (28-byte)
-        const accountIdentifier = toAccountIdentifier(Principal.fromText(toPrincipal));
-        transferResult = await this.sendIcpLedgerTransfer(
+        // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
+        console.log('[ICPay SDK] Using ICRC-1 transfer for ICP ledger');
+        transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
-          accountIdentifier,
+          toPrincipal,
           amount,
           memo,
           host
