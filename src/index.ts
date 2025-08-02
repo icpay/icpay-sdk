@@ -17,7 +17,6 @@ import axios, { AxiosInstance } from 'axios';
 import { HttpAgent, Actor } from '@dfinity/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
-import { idlFactory as icpLedgerIdl } from './declarations/icp-ledger/icp-ledger.did.js';
 import { Principal } from '@dfinity/principal';
 import { toAccountIdentifier } from './utils'; // We'll add this helper
 
@@ -481,49 +480,6 @@ export class Icpay {
     } else {
       throw new Error('Unexpected canister notify result');
     }
-  }
-
-  /**
-   * Send ICP ledger transfer (account identifier)
-   */
-  async sendIcpLedgerTransfer(
-    ledgerCanisterId: string,
-    accountIdentifier: Uint8Array,
-    amount: bigint,
-    memo?: Uint8Array,
-    host?: string
-  ): Promise<any> {
-    console.log('[ICPay SDK] sendIcpLedgerTransfer called with:', {
-      ledgerCanisterId,
-      accountIdentifierLength: accountIdentifier.length,
-      amount: amount.toString(),
-      memo: memo ? Array.from(memo) : undefined,
-      host
-    });
-
-    let actor;
-    if (this.actorProvider) {
-      console.log('[ICPay SDK] Using actorProvider for ICP transfer');
-      actor = this.actorProvider(ledgerCanisterId, icpLedgerIdl);
-    } else {
-      throw new Error('actorProvider is required for sending funds');
-    }
-
-    console.log('[ICPay SDK] Actor created, checking methods:', Object.keys(actor));
-
-    // Use ICP ledger's account_transfer method with account identifier
-    const transferArgs = {
-      to: Array.from(accountIdentifier),
-      amount,
-      fee: BigInt(10000), // Standard ICP transfer fee
-      memo: memo ? BigInt(memo[0] || 0) : BigInt(0),
-      from_subaccount: [],
-      created_at_time: [],
-    };
-
-    console.log('[ICPay SDK] Calling account_transfer with args:', transferArgs);
-
-    return await actor.account_transfer(transferArgs);
   }
 
   /**
