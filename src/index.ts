@@ -236,13 +236,13 @@ export class Icpay {
 
 
   /**
-   * Create a memo as a big-endian u64 (8 bytes) from a number
-   * Example: 2 => Uint8Array([0,0,0,0,0,0,0,2])
+   * Create a memo as a little-endian u64 (8 bytes) from a number
+   * Example: 2 => Uint8Array([2,0,0,0,0,0,0,0])
    */
   private createMemoWithAccountCanisterId(accountCanisterId: number): Uint8Array {
     const arr = new Uint8Array(8);
     let n = BigInt(accountCanisterId);
-    for (let i = 7; i >= 0; i--) {
+    for (let i = 0; i < 8; i++) {
       arr[i] = Number(n & 0xffn);
       n >>= 8n;
     }
