@@ -503,14 +503,10 @@ export class Icpay {
 
     let actor;
     if (this.actorProvider) {
-      console.log('[ICPay SDK] Using actorProvider');
+      console.log('[ICPay SDK] Using actorProvider for ICP transfer');
       actor = this.actorProvider(ledgerCanisterId, icpLedgerIdl);
     } else {
-      console.log('[ICPay SDK] Creating actor with HttpAgent');
-      // Attach the wallet's identity for signing
-      const identity = this.wallet.getIdentity?.() || this.externalWallet?.identity || undefined;
-      const agent = new HttpAgent({ host: host || this.icHost, ...(identity ? { identity } : {}) });
-      actor = Actor.createActor(icpLedgerIdl, { agent, canisterId: ledgerCanisterId });
+      throw new Error('actorProvider is required for sending funds');
     }
 
     console.log('[ICPay SDK] Actor created, checking methods:', Object.keys(actor));
@@ -543,12 +539,10 @@ export class Icpay {
   ): Promise<any> {
     let actor;
     if (this.actorProvider) {
+      console.log('[ICPay SDK] Using actorProvider for ICRC transfer');
       actor = this.actorProvider(ledgerCanisterId, ledgerIdl);
     } else {
-      // Attach the wallet's identity for signing
-      const identity = this.wallet.getIdentity?.() || this.externalWallet?.identity || undefined;
-      const agent = new HttpAgent({ host: host || this.icHost, ...(identity ? { identity } : {}) });
-      actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
+      throw new Error('actorProvider is required for sending funds');
     }
 
     // ICRC-1 transfer
