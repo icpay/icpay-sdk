@@ -24,9 +24,9 @@ export const idlFactory = ({ IDL }) => {
     BadFee: IDL.Record({ expected_fee: TransferFee }),
     BadBurn: IDL.Record({ min_burn_amount: Tokens }),
     InsufficientFunds: IDL.Record({ balance: Tokens }),
-    TooOld,
+    TooOld: IDL.Null,
     CreatedInFuture: IDL.Record({ ledger_time: TimeStamp }),
-    TemporarilyUnavailable,
+    TemporarilyUnavailable: IDL.Null,
     Duplicate: IDL.Record({ duplicate_of: BlockIndex }),
     GenericError: IDL.Record({ error_code: IDL.Nat, message: IDL.Text }),
   });
