@@ -583,7 +583,7 @@ export class Icpay {
         to_timestamp: [], // Use empty array instead of null
         status: [], // Use empty array instead of null
         limit: 100,
-        offset: 0
+        offset: [] // Use empty array instead of 0 for optional nat32
       });
 
       if (result && result.transactions) {
