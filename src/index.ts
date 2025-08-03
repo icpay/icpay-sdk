@@ -236,17 +236,26 @@ export class Icpay {
 
 
   /**
-   * Create a memo as a little-endian u64 (8 bytes) from a number
-   * Example: 2 => Uint8Array([2,0,0,0,0,0,0,0])
+   * Create a simple memo with account canister ID as bytes
+   * Example: 1 => Uint8Array([1]), 2 => Uint8Array([2])
    */
   private createMemoWithAccountCanisterId(accountCanisterId: number): Uint8Array {
-    const arr = new Uint8Array(8);
-    let n = BigInt(accountCanisterId);
-    for (let i = 0; i < 8; i++) {
-      arr[i] = Number(n & 0xffn);
-      n >>= 8n;
+    // Convert number to bytes (simple approach)
+    const bytes = [];
+    let num = accountCanisterId;
+
+    // Handle 0 case
+    if (num === 0) {
+      return new Uint8Array([0]);
     }
-    return arr;
+
+    // Convert to bytes (little-endian)
+    while (num > 0) {
+      bytes.push(num & 0xff);
+      num = Math.floor(num / 256);
+    }
+
+    return new Uint8Array(bytes);
   }
 
   /**
