@@ -1,7 +1,7 @@
 export const idlFactory = ({ IDL }) => {
   const Account = IDL.Record({
     'account_canister_id' : IDL.Nat64,
-    'platform_fee_percentage' : IDL.Nat8,
+    'platform_fee_percentage' : IDL.Nat16,
     'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'wallet_address' : IDL.Text,
     'platform_fee_fixed' : IDL.Opt(IDL.Nat),
@@ -62,6 +62,49 @@ export const idlFactory = ({ IDL }) => {
     'to_timestamp' : IDL.Opt(IDL.Nat64),
     'ledger_canister_id' : IDL.Opt(IDL.Text),
   });
+  const Icrc21ConsentMessageMetadata = IDL.Record({
+    'utc_offset_minutes' : IDL.Opt(IDL.Int16),
+    'language' : IDL.Text,
+  });
+  const Icrc21DeviceSpec = IDL.Variant({
+    'GenericDisplay' : IDL.Null,
+    'LineDisplay' : IDL.Record({
+      'characters_per_line' : IDL.Nat16,
+      'lines_per_page' : IDL.Nat16,
+    }),
+  });
+  const Icrc21ConsentMessageSpec = IDL.Record({
+    'metadata' : Icrc21ConsentMessageMetadata,
+    'device_spec' : IDL.Opt(Icrc21DeviceSpec),
+  });
+  const Icrc21ConsentMessageRequest = IDL.Record({
+    'arg' : IDL.Vec(IDL.Nat8),
+    'method' : IDL.Text,
+    'user_preferences' : Icrc21ConsentMessageSpec,
+  });
+  const Icrc21Page = IDL.Record({ 'lines' : IDL.Vec(IDL.Text) });
+  const Icrc21ConsentMessage = IDL.Variant({
+    'LineDisplayMessage' : IDL.Record({ 'pages' : IDL.Vec(Icrc21Page) }),
+    'GenericDisplayMessage' : IDL.Text,
+  });
+  const Icrc21ConsentInfo = IDL.Record({
+    'metadata' : Icrc21ConsentMessageMetadata,
+    'consent_message' : Icrc21ConsentMessage,
+  });
+  const Icrc21ErrorInfo = IDL.Record({ 'description' : IDL.Text });
+  const Icrc21Error = IDL.Variant({
+    'GenericError' : IDL.Record({
+      'description' : IDL.Text,
+      'error_code' : IDL.Nat64,
+    }),
+    'InsufficientPayment' : Icrc21ErrorInfo,
+    'UnsupportedCanisterCall' : Icrc21ErrorInfo,
+    'ConsentMessageUnavailable' : Icrc21ErrorInfo,
+  });
+  const Icrc21ConsentMessageResponse = IDL.Variant({
+    'Ok' : Icrc21ConsentInfo,
+    'Err' : Icrc21Error,
+  });
   const AccountRecord = IDL.Record({
     'account_canister_id' : IDL.Nat64,
     'account' : Account,
@@ -97,6 +140,11 @@ export const idlFactory = ({ IDL }) => {
         [TransactionFilter],
         [TransactionResult],
         ['query'],
+      ),
+    'icrc21_canister_call_consent_message' : IDL.Func(
+        [Icrc21ConsentMessageRequest],
+        [Icrc21ConsentMessageResponse],
+        [],
       ),
     'list_accounts' : IDL.Func([], [IDL.Vec(AccountRecord)], ['query']),
     'notify_ledger_transaction' : IDL.Func(

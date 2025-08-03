@@ -25,6 +25,44 @@ export interface CanisterMetrics {
   'total_transactions' : number,
   'platform_wallet' : string,
 }
+export interface Icrc21ConsentInfo {
+  'metadata' : Icrc21ConsentMessageMetadata,
+  'consent_message' : Icrc21ConsentMessage,
+}
+export type Icrc21ConsentMessage = {
+    'LineDisplayMessage' : { 'pages' : Array<Icrc21Page> }
+  } |
+  { 'GenericDisplayMessage' : string };
+export interface Icrc21ConsentMessageMetadata {
+  'utc_offset_minutes' : [] | [number],
+  'language' : string,
+}
+export interface Icrc21ConsentMessageRequest {
+  'arg' : Uint8Array | number[],
+  'method' : string,
+  'user_preferences' : Icrc21ConsentMessageSpec,
+}
+export type Icrc21ConsentMessageResponse = { 'Ok' : Icrc21ConsentInfo } |
+  { 'Err' : Icrc21Error };
+export interface Icrc21ConsentMessageSpec {
+  'metadata' : Icrc21ConsentMessageMetadata,
+  'device_spec' : [] | [Icrc21DeviceSpec],
+}
+export type Icrc21DeviceSpec = { 'GenericDisplay' : null } |
+  {
+    'LineDisplay' : {
+      'characters_per_line' : number,
+      'lines_per_page' : number,
+    }
+  };
+export type Icrc21Error = {
+    'GenericError' : { 'description' : string, 'error_code' : bigint }
+  } |
+  { 'InsufficientPayment' : Icrc21ErrorInfo } |
+  { 'UnsupportedCanisterCall' : Icrc21ErrorInfo } |
+  { 'ConsentMessageUnavailable' : Icrc21ErrorInfo };
+export interface Icrc21ErrorInfo { 'description' : string }
+export interface Icrc21Page { 'lines' : Array<string> }
 export interface LedgerAccount {
   'owner' : Principal,
   'subaccount' : [] | [Uint8Array | number[]],
@@ -95,6 +133,10 @@ export interface _SERVICE {
   'get_platform_wallet' : ActorMethod<[], string>,
   'get_transaction' : ActorMethod<[string], [] | [Transaction]>,
   'get_transactions' : ActorMethod<[TransactionFilter], TransactionResult>,
+  'icrc21_canister_call_consent_message' : ActorMethod<
+    [Icrc21ConsentMessageRequest],
+    Icrc21ConsentMessageResponse
+  >,
   'list_accounts' : ActorMethod<[], Array<AccountRecord>>,
   'notify_ledger_transaction' : ActorMethod<
     [LedgerTransactionNotification],

@@ -1,6 +1,6 @@
 type Account = record {
   account_canister_id : nat64;
-  platform_fee_percentage : nat8;
+  platform_fee_percentage : nat16;
   subaccount : opt blob;
   wallet_address : text;
   platform_fee_fixed : opt nat;
@@ -18,6 +18,43 @@ type CanisterMetrics = record {
   total_transactions : nat32;
   platform_wallet : text;
 };
+type Icrc21ConsentInfo = record {
+  metadata : Icrc21ConsentMessageMetadata;
+  consent_message : Icrc21ConsentMessage;
+};
+type Icrc21ConsentMessage = variant {
+  LineDisplayMessage : record { pages : vec Icrc21Page };
+  GenericDisplayMessage : text;
+};
+type Icrc21ConsentMessageMetadata = record {
+  utc_offset_minutes : opt int16;
+  language : text;
+};
+type Icrc21ConsentMessageRequest = record {
+  arg : blob;
+  method : text;
+  user_preferences : Icrc21ConsentMessageSpec;
+};
+type Icrc21ConsentMessageResponse = variant {
+  Ok : Icrc21ConsentInfo;
+  Err : Icrc21Error;
+};
+type Icrc21ConsentMessageSpec = record {
+  metadata : Icrc21ConsentMessageMetadata;
+  device_spec : opt Icrc21DeviceSpec;
+};
+type Icrc21DeviceSpec = variant {
+  GenericDisplay;
+  LineDisplay : record { characters_per_line : nat16; lines_per_page : nat16 };
+};
+type Icrc21Error = variant {
+  GenericError : record { description : text; error_code : nat64 };
+  InsufficientPayment : Icrc21ErrorInfo;
+  UnsupportedCanisterCall : Icrc21ErrorInfo;
+  ConsentMessageUnavailable : Icrc21ErrorInfo;
+};
+type Icrc21ErrorInfo = record { description : text };
+type Icrc21Page = record { lines : vec text };
 type LedgerAccount = record { owner : principal; subaccount : opt blob };
 type LedgerTransactionNotification = record {
   block_index : nat64;
@@ -83,6 +120,9 @@ service : () -> {
   get_platform_wallet : () -> (text) query;
   get_transaction : (text) -> (opt Transaction) query;
   get_transactions : (TransactionFilter) -> (TransactionResult) query;
+  icrc21_canister_call_consent_message : (Icrc21ConsentMessageRequest) -> (
+      Icrc21ConsentMessageResponse,
+    );
   list_accounts : () -> (vec AccountRecord) query;
   notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
   remove_account : (nat64) -> (Result);
