@@ -237,16 +237,24 @@ export class Icpay {
    */
   async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
     try {
+      console.log('[ICPay SDK] getLedgerBalance called for ledger:', ledgerCanisterId);
+      console.log('[ICPay SDK] externalWallet:', this.externalWallet);
+
       // Extract principal from external wallet
       let principal: string | null = null;
 
       if (this.externalWallet) {
+        console.log('[ICPay SDK] externalWallet.owner:', this.externalWallet.owner);
+        console.log('[ICPay SDK] externalWallet.principal:', this.externalWallet.principal);
+
         if (this.externalWallet.owner) {
           principal = this.externalWallet.owner;
         } else if (this.externalWallet.principal) {
           principal = this.externalWallet.principal;
         }
       }
+
+      console.log('[ICPay SDK] extracted principal:', principal);
 
       if (!principal) {
         throw new Error('No principal available for balance check');
@@ -256,14 +264,18 @@ export class Icpay {
       const agent = new HttpAgent({ host: this.icHost });
       const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
 
+      console.log('[ICPay SDK] calling icrc1_balance_of with account:', { owner: principal, subaccount: [] });
+
       // Get the balance of the user's account
       const result = await (actor as any).icrc1_balance_of({
-        account: { owner: principal, subaccount: [] }
+        owner: principal,
+        subaccount: []
       });
 
+      console.log('[ICPay SDK] balance result:', result);
       return BigInt(result);
     } catch (error) {
-      console.error(`getLedgerBalance error for ${ledgerCanisterId}:`, error);
+      console.error(`[ICPay SDK] getLedgerBalance error for ${ledgerCanisterId}:`, error);
       throw error;
     }
   }
@@ -297,20 +309,35 @@ export class Icpay {
    * This is now a real transaction, not mock data.
    */
   async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
+    console.log('[ICPay SDK] sendFunds called with request:', request);
+
     try {
       // Always use icpayCanisterId as toPrincipal
       if (!this.icpayCanisterId) {
+        console.log('[ICPay SDK] Fetching account info to get canister ID');
         await this.fetchAccountInfo();
       }
+
       const ledgerCanisterId = request.ledgerCanisterId;
       let toPrincipal = this.icpayCanisterId!;
       const amount = typeof request.amount === 'string' ? BigInt(request.amount) : BigInt(request.amount);
       const host = this.icHost;
       let memo: Uint8Array | undefined = this.createMemoWithAccountCanisterId(parseInt(request.accountCanisterId));
 
+      console.log('[ICPay SDK] Transaction details:', {
+        ledgerCanisterId,
+        toPrincipal,
+        amount: amount.toString(),
+        currency: request.currency
+      });
+
       // Check balance before sending
+      console.log('[ICPay SDK] Checking balance before sending...');
       const balance = await this.getBalance();
       const requiredAmount = amount;
+
+      console.log('[ICPay SDK] Balance check result:', balance);
+      console.log('[ICPay SDK] Required amount:', requiredAmount.toString());
 
       // Helper function to make amounts human-readable
       const formatAmount = (amount: bigint, decimals: number = 8, symbol: string = '') => {
@@ -323,13 +350,17 @@ export class Icpay {
 
       // Check if user has sufficient balance based on ledger type
       try {
+        console.log('[ICPay SDK] Getting ledger balance for:', ledgerCanisterId);
         // Get the actual balance from the specific ledger (works for all ICRC ledgers including ICP)
         const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
+        console.log('[ICPay SDK] Actual ledger balance:', actualBalance.toString());
+
         if (actualBalance < requiredAmount) {
           // Determine symbol based on ledger ID or request currency
           const symbol = request.currency || 'TOKEN';
           const requiredFormatted = formatAmount(requiredAmount, 8, symbol);
           const availableFormatted = formatAmount(actualBalance, 8, symbol);
+          console.log('[ICPay SDK] Insufficient balance:', { requiredFormatted, availableFormatted });
           throw new IcpayError({
             code: 'INSUFFICIENT_BALANCE',
             message: `Insufficient ${symbol} balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
@@ -338,7 +369,7 @@ export class Icpay {
         }
       } catch (balanceError) {
         // If we can't fetch the specific ledger balance, fall back to the old logic
-        console.warn('Failed to fetch specific ledger balance, falling back to wallet balance:', balanceError);
+        console.warn('[ICPay SDK] Failed to fetch specific ledger balance, falling back to wallet balance:', balanceError);
 
         if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
           // ICP ledger fallback
@@ -365,6 +396,8 @@ export class Icpay {
         }
       }
 
+      console.log('[ICPay SDK] Balance check passed, proceeding with transfer...');
+
       let transferResult;
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
@@ -378,6 +411,7 @@ export class Icpay {
         );
       } else {
         // ICRC-1 ledgers: use principal directly
+        console.log('[ICPay SDK] Using ICRC-1 transfer for other ledger');
         transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
           toPrincipal,
@@ -387,18 +421,23 @@ export class Icpay {
         );
       }
 
+      console.log('[ICPay SDK] Transfer result:', transferResult);
+
       // Assume transferResult returns a block index or transaction id
       const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
 
       // First, notify the canister about the ledger transaction
       let canisterTransactionId: string;
       try {
+        console.log('[ICPay SDK] Notifying canister about ledger transaction...');
         canisterTransactionId = await this.notifyLedgerTransaction(
           this.icpayCanisterId!,
           ledgerCanisterId,
           BigInt(blockIndex)
         );
+        console.log('[ICPay SDK] Canister transaction ID:', canisterTransactionId);
       } catch (notifyError) {
+        console.warn('[ICPay SDK] Failed to notify canister, using block index as transaction ID');
         canisterTransactionId = blockIndex;
       }
 
@@ -406,9 +445,12 @@ export class Icpay {
       // Use the transaction ID returned by the notification, not the block index
       let status: any = null;
       try {
+        console.log('[ICPay SDK] Polling for transaction status...');
         status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
+        console.log('[ICPay SDK] Transaction status:', status);
       } catch (e) {
         // If polling fails, still return the transactionId and pending status
+        console.warn('[ICPay SDK] Failed to poll transaction status, using pending');
         status = { status: 'pending' };
       }
 
@@ -434,7 +476,7 @@ export class Icpay {
         }
       }
 
-      return {
+      const response = {
         transactionId: canisterTransactionId,
         status: statusString,
         amount: amount.toString(),
@@ -443,6 +485,9 @@ export class Icpay {
         description: 'Fund transfer',
         metadata: request.metadata
       };
+
+      console.log('[ICPay SDK] Returning transaction response:', response);
+      return response;
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('[ICPay SDK] sendFunds error details:', error);

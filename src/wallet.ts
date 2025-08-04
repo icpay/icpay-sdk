@@ -249,7 +249,11 @@ export class IcpayWallet {
    * Get the balance of the connected wallet
    */
   async getBalance(): Promise<Balance> {
+    console.log('[ICPay SDK] getBalance called');
+    console.log('[ICPay SDK] isConnected result:', this.isConnected());
+
     if (!this.isConnected()) {
+      console.log('[ICPay SDK] Wallet not connected, throwing error');
       throw new IcpayError({
         code: 'WALLET_NOT_CONNECTED',
         message: 'Wallet is not connected'
@@ -261,23 +265,33 @@ export class IcpayWallet {
 
       // Use external wallet if available
       if (this.externalWallet) {
+        console.log('[ICPay SDK] Using external wallet for balance check');
+        console.log('[ICPay SDK] externalWallet.owner:', this.externalWallet.owner);
+        console.log('[ICPay SDK] externalWallet.principal:', this.externalWallet.principal);
+
         // For Plug N Play wallets, extract principal from the account object
         if (this.externalWallet.owner) {
           // Convert owner string to principal
           try {
             principal = Principal.fromText(this.externalWallet.owner);
+            console.log('[ICPay SDK] Converted owner to principal:', principal.toString());
           } catch (error) {
-            console.warn('Failed to parse principal from owner:', error);
+            console.warn('[ICPay SDK] Failed to parse principal from owner:', error);
           }
         } else if (this.externalWallet.principal) {
           principal = this.externalWallet.principal;
+          console.log('[ICPay SDK] Using externalWallet.principal:', principal?.toString());
         }
       } else {
+        console.log('[ICPay SDK] Using internal principal');
         // Use internal principal
         principal = this.principal;
       }
 
+      console.log('[ICPay SDK] Final principal for balance check:', principal?.toString());
+
       if (!principal) {
+        console.log('[ICPay SDK] No principal available, throwing error');
         throw new IcpayError({
           code: 'WALLET_NOT_CONNECTED',
           message: 'No valid principal found'
@@ -303,19 +317,24 @@ export class IcpayWallet {
           owner: principal,
           subaccount: []
         };
+        console.log('[ICPay SDK] Fetching ICP balance with account:', icpAccount);
         const icpBalanceResult = await icpLedger.icrc1_balance_of(icpAccount);
         icpBalance = Number(icpBalanceResult);
+        console.log('[ICPay SDK] ICP balance result:', icpBalance);
       } catch (error) {
-        console.warn('Failed to fetch ICP balance:', error);
+        console.warn('[ICPay SDK] Failed to fetch ICP balance:', error);
       }
 
       // For now, return mock data for other tokens
       // TODO: Implement real balance fetching for other ledgers
-      return {
+      const result = {
         icp: icpBalance,
         icpayTest: 0 // Mock data for now
       };
+      console.log('[ICPay SDK] Returning balance:', result);
+      return result;
     } catch (error) {
+      console.error('[ICPay SDK] getBalance error:', error);
       throw new IcpayError({
         code: 'BALANCE_FETCH_FAILED',
         message: 'Failed to fetch wallet balance',
@@ -343,24 +362,42 @@ export class IcpayWallet {
    * Check if wallet is connected
    */
   isConnected(): boolean {
+    console.log('[ICPay SDK] isConnected called');
+    console.log('[ICPay SDK] externalWallet:', this.externalWallet);
+    console.log('[ICPay SDK] identity:', this.identity);
+    console.log('[ICPay SDK] principal:', this.principal);
+
     // If using an external wallet, check for various properties that indicate connection
     if (this.externalWallet) {
+      console.log('[ICPay SDK] externalWallet.owner:', this.externalWallet.owner);
+      console.log('[ICPay SDK] externalWallet.principal:', this.externalWallet.principal);
+      console.log('[ICPay SDK] externalWallet.getPrincipal:', typeof this.externalWallet.getPrincipal);
+      console.log('[ICPay SDK] externalWallet.connected:', this.externalWallet.connected);
+
       // Check if it has a principal/owner property (Plug N Play style)
       if (this.externalWallet.owner || this.externalWallet.principal) {
+        console.log('[ICPay SDK] Wallet connected via owner/principal');
         return true;
       }
       // Check if it has getPrincipal method
       if (typeof this.externalWallet.getPrincipal === 'function') {
+        console.log('[ICPay SDK] Wallet connected via getPrincipal method');
         return true;
       }
       // Check for connected property
       if ('connected' in this.externalWallet) {
+        console.log('[ICPay SDK] Wallet connected via connected property:', !!this.externalWallet.connected);
         return !!this.externalWallet.connected;
       }
       // If it's a non-null object, assume it's connected
-      return this.externalWallet !== null && typeof this.externalWallet === 'object';
+      const isObject = this.externalWallet !== null && typeof this.externalWallet === 'object';
+      console.log('[ICPay SDK] Wallet connected via object check:', isObject);
+      return isObject;
     }
-    return this.identity !== null && this.principal !== null;
+
+    const hasIdentity = this.identity !== null && this.principal !== null;
+    console.log('[ICPay SDK] Wallet connected via identity/principal:', hasIdentity);
+    return hasIdentity;
   }
 
   /**
