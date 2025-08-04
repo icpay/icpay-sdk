@@ -232,7 +232,32 @@ export class Icpay {
     return await this.wallet.getBalance();
   }
 
+  /**
+   * Get balance for a specific ledger canister
+   */
+  async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
+    try {
+      // Get the user's principal from the wallet
+      const principal = this.wallet.getPrincipal();
+      if (!principal) {
+        throw new Error('No principal available for balance check');
+      }
 
+      // Create anonymous actor for canister queries
+      const agent = new HttpAgent({ host: this.icHost });
+      const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
+
+      // Get the balance of the user's account
+      const result = await (actor as any).icrc1_balance_of({
+        account: { owner: principal, subaccount: [] }
+      });
+
+      return BigInt(result);
+    } catch (error) {
+      console.error(`getLedgerBalance error for ${ledgerCanisterId}:`, error);
+      throw error;
+    }
+  }
 
 
   /**
@@ -278,24 +303,54 @@ export class Icpay {
       const balance = await this.getBalance();
       const requiredAmount = amount;
 
-      // Check if user has sufficient balance
+      // Helper function to make amounts human-readable
+      const formatAmount = (amount: bigint, decimals: number = 8, symbol: string = '') => {
+        const divisor = BigInt(10 ** decimals);
+        const whole = amount / divisor;
+        const fraction = amount % divisor;
+        const fractionStr = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+        return `${whole}${fractionStr ? '.' + fractionStr : ''} ${symbol}`.trim();
+      };
+
+      // Check if user has sufficient balance based on ledger type
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
         // ICP ledger
         if (balance.icp < requiredAmount) {
+          const requiredFormatted = formatAmount(requiredAmount, 8, 'ICP');
+          const availableFormatted = formatAmount(BigInt(balance.icp), 8, 'ICP');
           throw new IcpayError({
             code: 'INSUFFICIENT_BALANCE',
-            message: `Insufficient ICP balance. Required: ${requiredAmount}, Available: ${balance.icp}`,
+            message: `Insufficient ICP balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
             details: { required: requiredAmount, available: balance.icp }
           });
         }
       } else {
-        // Other ledgers - check icpayTest balance for now
-        if (balance.icpayTest < requiredAmount) {
-          throw new IcpayError({
-            code: 'INSUFFICIENT_BALANCE',
-            message: `Insufficient token balance. Required: ${requiredAmount}, Available: ${balance.icpayTest}`,
-            details: { required: requiredAmount, available: balance.icpayTest }
-          });
+        // For other ledgers (PAY, etc.), we need to fetch the actual balance from the specific ledger
+        try {
+          // Get the actual balance from the specific ledger
+          const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
+          if (actualBalance < requiredAmount) {
+            // Determine symbol based on ledger ID or request currency
+            const symbol = request.currency || 'TOKEN';
+            const requiredFormatted = formatAmount(requiredAmount, 8, symbol);
+            const availableFormatted = formatAmount(actualBalance, 8, symbol);
+            throw new IcpayError({
+              code: 'INSUFFICIENT_BALANCE',
+              message: `Insufficient ${symbol} balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
+              details: { required: requiredAmount, available: actualBalance }
+            });
+          }
+        } catch (balanceError) {
+          // If we can't fetch the specific ledger balance, fall back to the old logic
+          if (balance.icpayTest < requiredAmount) {
+            const requiredFormatted = formatAmount(requiredAmount, 8, 'PAY');
+            const availableFormatted = formatAmount(BigInt(balance.icpayTest), 8, 'PAY');
+            throw new IcpayError({
+              code: 'INSUFFICIENT_BALANCE',
+              message: `Insufficient PAY balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
+              details: { required: requiredAmount, available: balance.icpayTest }
+            });
+          }
         }
       }
 
