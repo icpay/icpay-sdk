@@ -249,7 +249,7 @@ export class IcpayWallet {
    * Get the balance of the connected wallet
    */
   async getBalance(): Promise<Balance> {
-    if (!this.identity) {
+    if (!this.isConnected()) {
       throw new IcpayError({
         code: 'WALLET_NOT_CONNECTED',
         message: 'Wallet is not connected'
@@ -257,9 +257,41 @@ export class IcpayWallet {
     }
 
     try {
-      // Create an agent with the connected identity
+      let identity: Identity | null = null;
+      let principal: Principal | null = null;
+
+      // Use external wallet if available
+      if (this.externalWallet) {
+        // For Plug N Play wallets, we need to get the identity from the external wallet
+        if (this.externalWallet.identity) {
+          identity = this.externalWallet.identity;
+        }
+        if (this.externalWallet.principal) {
+          principal = this.externalWallet.principal;
+        } else if (this.externalWallet.owner) {
+          // Convert owner string to principal
+          try {
+            principal = Principal.fromText(this.externalWallet.owner);
+          } catch (error) {
+            console.warn('Failed to parse principal from owner:', error);
+          }
+        }
+      } else {
+        // Use internal identity
+        identity = this.identity;
+        principal = this.principal;
+      }
+
+      if (!identity || !principal) {
+        throw new IcpayError({
+          code: 'WALLET_NOT_CONNECTED',
+          message: 'No valid identity or principal found'
+        });
+      }
+
+      // Create an agent with the identity
       const agent = new HttpAgent({
-        identity: this.identity,
+        identity,
         host: 'https://ic0.app'
       });
 
@@ -273,7 +305,7 @@ export class IcpayWallet {
       let icpBalance = 0;
       try {
         const icpAccount = {
-          owner: this.principal!,
+          owner: principal,
           subaccount: []
         };
         const icpBalanceResult = await icpLedger.icrc1_balance_of(icpAccount);
@@ -316,16 +348,22 @@ export class IcpayWallet {
    * Check if wallet is connected
    */
   isConnected(): boolean {
-    // If using an external wallet, check for getPrincipal and connected property or just presence
+    // If using an external wallet, check for various properties that indicate connection
     if (this.externalWallet) {
-      if (typeof this.externalWallet.getPrincipal === 'function') {
-        // Optionally check for a connected property, but default to true if getPrincipal exists
-        if ('connected' in this.externalWallet) {
-          return !!this.externalWallet.connected;
-        }
+      // Check if it has a principal/owner property (Plug N Play style)
+      if (this.externalWallet.owner || this.externalWallet.principal) {
         return true;
       }
-      return false;
+      // Check if it has getPrincipal method
+      if (typeof this.externalWallet.getPrincipal === 'function') {
+        return true;
+      }
+      // Check for connected property
+      if ('connected' in this.externalWallet) {
+        return !!this.externalWallet.connected;
+      }
+      // If it's a non-null object, assume it's connected
+      return this.externalWallet !== null && typeof this.externalWallet === 'object';
     }
     return this.identity !== null && this.principal !== null;
   }
