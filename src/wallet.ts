@@ -3,6 +3,9 @@ import { Identity } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { WalletInfo, Balance, WalletProvider, WalletConnectionResult } from './types';
 import { IcpayError } from './errors';
+import { HttpAgent } from '@dfinity/agent';
+import { Actor } from '@dfinity/agent';
+import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 
 // Type declarations for browser APIs
 declare global {
@@ -254,11 +257,36 @@ export class IcpayWallet {
     }
 
     try {
-      // TODO: Implement actual balance fetching from IC ledger
-      // For now, return mock data
+      // Create an agent with the connected identity
+      const agent = new HttpAgent({
+        identity: this.identity,
+        host: 'https://ic0.app'
+      });
+
+      // Fetch ICP balance from the ICP ledger
+      const icpLedgerId = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+      const icpLedger = Actor.createActor(ledgerIdl, {
+        agent,
+        canisterId: icpLedgerId
+      });
+
+      let icpBalance = 0;
+      try {
+        const icpAccount = {
+          owner: this.principal!,
+          subaccount: []
+        };
+        const icpBalanceResult = await icpLedger.icrc1_balance_of(icpAccount);
+        icpBalance = Number(icpBalanceResult);
+      } catch (error) {
+        console.warn('Failed to fetch ICP balance:', error);
+      }
+
+      // For now, return mock data for other tokens
+      // TODO: Implement real balance fetching for other ledgers
       return {
-        icp: 0,
-        icpayTest: 0
+        icp: icpBalance,
+        icpayTest: 0 // Mock data for now
       };
     } catch (error) {
       throw new IcpayError({

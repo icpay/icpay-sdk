@@ -274,6 +274,31 @@ export class Icpay {
       const host = this.icHost;
       let memo: Uint8Array | undefined = this.createMemoWithAccountCanisterId(parseInt(request.accountCanisterId));
 
+      // Check balance before sending
+      const balance = await this.getBalance();
+      const requiredAmount = amount;
+
+      // Check if user has sufficient balance
+      if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
+        // ICP ledger
+        if (balance.icp < requiredAmount) {
+          throw new IcpayError({
+            code: 'INSUFFICIENT_BALANCE',
+            message: `Insufficient ICP balance. Required: ${requiredAmount}, Available: ${balance.icp}`,
+            details: { required: requiredAmount, available: balance.icp }
+          });
+        }
+      } else {
+        // Other ledgers - check icpayTest balance for now
+        if (balance.icpayTest < requiredAmount) {
+          throw new IcpayError({
+            code: 'INSUFFICIENT_BALANCE',
+            message: `Insufficient token balance. Required: ${requiredAmount}, Available: ${balance.icpayTest}`,
+            details: { required: requiredAmount, available: balance.icpayTest }
+          });
+        }
+      }
+
       let transferResult;
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
