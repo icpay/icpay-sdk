@@ -257,41 +257,36 @@ export class IcpayWallet {
     }
 
     try {
-      let identity: Identity | null = null;
       let principal: Principal | null = null;
 
       // Use external wallet if available
       if (this.externalWallet) {
-        // For Plug N Play wallets, we need to get the identity from the external wallet
-        if (this.externalWallet.identity) {
-          identity = this.externalWallet.identity;
-        }
-        if (this.externalWallet.principal) {
-          principal = this.externalWallet.principal;
-        } else if (this.externalWallet.owner) {
+        // For Plug N Play wallets, extract principal from the account object
+        if (this.externalWallet.owner) {
           // Convert owner string to principal
           try {
             principal = Principal.fromText(this.externalWallet.owner);
           } catch (error) {
             console.warn('Failed to parse principal from owner:', error);
           }
+        } else if (this.externalWallet.principal) {
+          principal = this.externalWallet.principal;
         }
       } else {
-        // Use internal identity
-        identity = this.identity;
+        // Use internal principal
         principal = this.principal;
       }
 
-      if (!identity || !principal) {
+      if (!principal) {
         throw new IcpayError({
           code: 'WALLET_NOT_CONNECTED',
-          message: 'No valid identity or principal found'
+          message: 'No valid principal found'
         });
       }
 
-      // Create an agent with the identity
+      // For Plug N Play wallets, we need to use anonymous actor for balance checking
+      // since balance queries don't require signing
       const agent = new HttpAgent({
-        identity,
         host: 'https://ic0.app'
       });
 

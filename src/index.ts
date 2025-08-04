@@ -47,7 +47,7 @@ export class Icpay {
     this.actorProvider = config.actorProvider;
 
     if (this.externalWallet) {
-      this.wallet = new IcpayWallet({ externalWallet: this.externalWallet.account });
+      this.wallet = new IcpayWallet({ externalWallet: this.externalWallet });
     } else if (this.usePlugNPlay) {
       this.wallet = new IcpayWallet({ usePlugNPlay: true, plugNPlayConfig: this.plugNPlayConfig });
     } else {
