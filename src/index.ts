@@ -237,13 +237,22 @@ export class Icpay {
    */
   async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
     try {
-      // Get the user's principal from the wallet
-      const principal = this.wallet.getPrincipal();
+      // Extract principal from external wallet
+      let principal: string | null = null;
+
+      if (this.externalWallet) {
+        if (this.externalWallet.owner) {
+          principal = this.externalWallet.owner;
+        } else if (this.externalWallet.principal) {
+          principal = this.externalWallet.principal;
+        }
+      }
+
       if (!principal) {
         throw new Error('No principal available for balance check');
       }
 
-      // Create anonymous actor for canister queries
+      // Create anonymous actor for balance queries (no signing required)
       const agent = new HttpAgent({ host: this.icHost });
       const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
 
@@ -313,35 +322,37 @@ export class Icpay {
       };
 
       // Check if user has sufficient balance based on ledger type
-      if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
-        // ICP ledger
-        if (balance.icp < requiredAmount) {
-          const requiredFormatted = formatAmount(requiredAmount, 8, 'ICP');
-          const availableFormatted = formatAmount(BigInt(balance.icp), 8, 'ICP');
+      try {
+        // Get the actual balance from the specific ledger (works for all ICRC ledgers including ICP)
+        const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
+        if (actualBalance < requiredAmount) {
+          // Determine symbol based on ledger ID or request currency
+          const symbol = request.currency || 'TOKEN';
+          const requiredFormatted = formatAmount(requiredAmount, 8, symbol);
+          const availableFormatted = formatAmount(actualBalance, 8, symbol);
           throw new IcpayError({
             code: 'INSUFFICIENT_BALANCE',
-            message: `Insufficient ICP balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
-            details: { required: requiredAmount, available: balance.icp }
+            message: `Insufficient ${symbol} balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
+            details: { required: requiredAmount, available: actualBalance }
           });
         }
-      } else {
-        // For other ledgers (PAY, etc.), we need to fetch the actual balance from the specific ledger
-        try {
-          // Get the actual balance from the specific ledger
-          const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
-          if (actualBalance < requiredAmount) {
-            // Determine symbol based on ledger ID or request currency
-            const symbol = request.currency || 'TOKEN';
-            const requiredFormatted = formatAmount(requiredAmount, 8, symbol);
-            const availableFormatted = formatAmount(actualBalance, 8, symbol);
+      } catch (balanceError) {
+        // If we can't fetch the specific ledger balance, fall back to the old logic
+        console.warn('Failed to fetch specific ledger balance, falling back to wallet balance:', balanceError);
+
+        if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
+          // ICP ledger fallback
+          if (balance.icp < requiredAmount) {
+            const requiredFormatted = formatAmount(requiredAmount, 8, 'ICP');
+            const availableFormatted = formatAmount(BigInt(balance.icp), 8, 'ICP');
             throw new IcpayError({
               code: 'INSUFFICIENT_BALANCE',
-              message: `Insufficient ${symbol} balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
-              details: { required: requiredAmount, available: actualBalance }
+              message: `Insufficient ICP balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
+              details: { required: requiredAmount, available: balance.icp }
             });
           }
-        } catch (balanceError) {
-          // If we can't fetch the specific ledger balance, fall back to the old logic
+        } else {
+          // Other ledgers fallback
           if (balance.icpayTest < requiredAmount) {
             const requiredFormatted = formatAmount(requiredAmount, 8, 'PAY');
             const availableFormatted = formatAmount(BigInt(balance.icpayTest), 8, 'PAY');
