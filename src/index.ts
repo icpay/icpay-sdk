@@ -260,15 +260,19 @@ export class Icpay {
         throw new Error('No principal available for balance check');
       }
 
+      // Convert string principal to Principal object
+      const principalObj = Principal.fromText(principal);
+      console.log('[ICPay SDK] converted principal object:', principalObj.toString());
+
       // Create anonymous actor for balance queries (no signing required)
       const agent = new HttpAgent({ host: this.icHost });
       const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
 
-      console.log('[ICPay SDK] calling icrc1_balance_of with account:', { owner: principal, subaccount: [] });
+      console.log('[ICPay SDK] calling icrc1_balance_of with account:', { owner: principalObj, subaccount: [] });
 
       // Get the balance of the user's account
       const result = await (actor as any).icrc1_balance_of({
-        owner: principal,
+        owner: principalObj,
         subaccount: []
       });
 
