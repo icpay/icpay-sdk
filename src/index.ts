@@ -358,11 +358,12 @@ export class Icpay {
         } else {
           // Other ledgers fallback
           if (balance.icpayTest < requiredAmount) {
-            const requiredFormatted = formatAmount(requiredAmount, 8, 'PAY');
-            const availableFormatted = formatAmount(BigInt(balance.icpayTest), 8, 'PAY');
+            const symbol = request.currency || 'TOKEN';
+            const requiredFormatted = formatAmount(requiredAmount, 8, symbol);
+            const availableFormatted = formatAmount(BigInt(balance.icpayTest), 8, symbol);
             throw new IcpayError({
               code: 'INSUFFICIENT_BALANCE',
-              message: `Insufficient PAY balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
+              message: `Insufficient ${symbol} balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
               details: { required: requiredAmount, available: balance.icpayTest }
             });
           }
