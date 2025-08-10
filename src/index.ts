@@ -551,7 +551,12 @@ export class Icpay {
           if (transaction && typeof transaction === 'object') {
             // Check if we have a valid status
             if ((transaction as any).status) {
-              return transaction; // Return immediately when we find a valid status
+              // Check if transaction is completed
+              const transactionStatus = (transaction as any).status;
+              if (this.isTransactionCompleted(transactionStatus)) {
+                return transaction; // Return immediately when completed
+              }
+              // If not completed, continue polling
             }
           }
         }
@@ -561,17 +566,28 @@ export class Icpay {
           status = await this.getTransactionByFilter(transactionId);
 
           if (status && status.status) {
-            return status; // Return immediately when we find a valid status
+            if (this.isTransactionCompleted(status.status)) {
+              return status; // Return immediately when completed
+            }
+            // If not completed, continue polling
           }
         }
 
         if (status && status.status) {
-          return status; // Return immediately when we find a valid status
+          if (this.isTransactionCompleted(status.status)) {
+            return status; // Return immediately when completed
+          }
+          // If not completed, continue polling
         }
 
         // Check if status is an object with Ok/Err pattern
         if (status && typeof status === 'object' && ((status as any).Ok || (status as any).Err)) {
           return status; // Return immediately when we find a valid status
+        }
+
+        // Wait before next attempt (unless this is the last attempt)
+        if (attempt < maxAttempts - 1) {
+          await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
 
       } catch (error) {
@@ -583,6 +599,29 @@ export class Icpay {
     }
 
     throw new Error('Transaction status polling timed out');
+  }
+
+  /**
+   * Check if transaction status indicates completion
+   */
+  private isTransactionCompleted(status: any): boolean {
+    if (!status) return false;
+
+    // Handle variant status like {Completed: null}
+    if (typeof status === 'object') {
+      const statusKeys = Object.keys(status);
+      if (statusKeys.length > 0) {
+        const rawStatus = statusKeys[0].toLowerCase();
+        return rawStatus === 'completed';
+      }
+    }
+
+    // Handle string status
+    if (typeof status === 'string') {
+      return status.toLowerCase() === 'completed';
+    }
+
+    return false;
   }
 
   /**
