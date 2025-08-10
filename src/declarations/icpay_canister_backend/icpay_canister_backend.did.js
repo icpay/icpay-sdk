@@ -29,6 +29,7 @@ export const idlFactory = ({ IDL }) => {
     'index_to_account' : IDL.Opt(IDL.Nat64),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'receiver_amount' : IDL.Nat,
+    'notify_processing' : IDL.Bool,
     'timestamp' : IDL.Nat64,
     'index_received' : IDL.Opt(IDL.Nat64),
     'sender_principal_id' : IDL.Text,

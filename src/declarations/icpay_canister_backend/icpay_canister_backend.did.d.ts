@@ -85,6 +85,7 @@ export interface Transaction {
   'index_to_account' : [] | [bigint],
   'timestamp_to_account' : [] | [bigint],
   'receiver_amount' : bigint,
+  'notify_processing' : boolean,
   'timestamp' : bigint,
   'index_received' : [] | [bigint],
   'sender_principal_id' : string,
