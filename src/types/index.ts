@@ -103,7 +103,7 @@ export interface CreateTransactionRequest {
 }
 
 export interface TransactionResponse {
-  transactionId: string;
+  transactionId: number;
   status: 'pending' | 'completed' | 'failed';
   amount: string;
   recipientCanister: string;
@@ -113,7 +113,7 @@ export interface TransactionResponse {
 }
 
 export interface TransactionStatus {
-  transactionId: string;
+  transactionId: number;
   status: 'pending' | 'completed' | 'failed';
   blockHeight?: number;
   timestamp: Date;
