@@ -142,7 +142,7 @@ export class Icpay {
         // If polling fails, still return the transactionId and pending status
         console.warn('Failed to poll transaction status:', e);
         return {
-          transactionId: canisterTransactionId.toString(),
+          transactionId: canisterTransactionId,
           status: 'pending',
           timestamp: new Date(),
           error: 'Status polling failed, assuming pending'
@@ -164,7 +164,7 @@ export class Icpay {
         }
 
         return {
-          transactionId: canisterTransactionId.toString(),
+          transactionId: canisterTransactionId,
           status: dbStatus,
           timestamp: new Date(),
           blockHeight: status.index_received || status.index_to_account || status.index_to_platform
@@ -172,7 +172,7 @@ export class Icpay {
       }
 
       return {
-        transactionId: canisterTransactionId.toString(),
+        transactionId: canisterTransactionId,
         status: 'pending',
         timestamp: new Date(),
         error: 'No status information available'
@@ -430,22 +430,23 @@ export class Icpay {
       const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
 
       // First, notify the canister about the ledger transaction
-      let canisterTransactionId: string;
+      let canisterTransactionId: number;
       try {
-        canisterTransactionId = await this.notifyLedgerTransaction(
+        const transactionIdString = await this.notifyLedgerTransaction(
           this.icpayCanisterId!,
           ledgerCanisterId,
           BigInt(blockIndex)
         );
+        canisterTransactionId = parseInt(transactionIdString, 10);
       } catch (notifyError) {
-        canisterTransactionId = blockIndex;
+        canisterTransactionId = parseInt(blockIndex, 10);
       }
 
       // Poll for transaction status until completed
       // Use the transaction ID returned by the notification, not the block index
       let status: any = null;
       try {
-        status = await this.pollTransactionStatus(this.icpayCanisterId!, parseInt(canisterTransactionId), 2000, 30);
+        status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
       } catch (e) {
         // If polling fails, still return the transactionId and pending status
         status = { status: 'pending' };
