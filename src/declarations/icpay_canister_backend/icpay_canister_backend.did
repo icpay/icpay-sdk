@@ -63,10 +63,11 @@ type LedgerTransactionNotification = record {
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : text; Err : text };
 type Transaction = record {
-  id : text;
+  id : nat;
   status : TransactionStatus;
   account_canister_id : nat64;
   platform_fee_amount : nat;
+  transfer_fee : nat;
   recipient : LedgerAccount;
   index_to_account : opt nat64;
   timestamp_to_account : opt nat64;
@@ -84,6 +85,7 @@ type TransactionFilter = record {
   from_timestamp : opt nat64;
   status : opt TransactionStatus;
   account_canister_id : opt nat64;
+  from_id : opt nat;
   offset : opt nat32;
   limit : opt nat32;
   to_timestamp : opt nat64;
@@ -114,20 +116,23 @@ service : () -> {
     ) query;
   get_canister_info : () -> (CanisterMetrics);
   get_controller : () -> (principal) query;
+  get_controllers : () -> (vec principal) query;
   get_ledger_transactions : (text, opt nat32, opt nat32) -> (
       TransactionResult,
     ) query;
   get_platform_wallet : () -> (text) query;
-  get_transaction : (text) -> (opt Transaction) query;
+  get_transaction : (nat) -> (opt Transaction) query;
   get_transactions : (TransactionFilter) -> (TransactionResult) query;
   icrc21_canister_call_consent_message : (Icrc21ConsentMessageRequest) -> (
       Icrc21ConsentMessageResponse,
     );
+  initialize_controllers : () -> (Result);
   list_accounts : () -> (vec AccountRecord) query;
   notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
   remove_account : (nat64) -> (Result);
   set_controller : (principal) -> (Result);
   set_platform_wallet : (text) -> (Result);
   update_account : (nat64, Account) -> (Result);
+  update_controllers : () -> (Result);
   withdraw_funds : (WithdrawRequest) -> (Result_1);
 }

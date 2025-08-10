@@ -129,22 +129,57 @@ export class Icpay {
   /**
    * Get transaction status by canister transaction ID
    */
-  async getTransactionStatus(canisterTransactionId: string): Promise<TransactionStatus> {
+  async getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus> {
     try {
-      const response = await this.apiClient.get(`/sdk/transactions/${canisterTransactionId}/status`);
+      if (!this.icpayCanisterId) {
+        await this.fetchAccountInfo();
+      }
+
+      let status: any = null;
+      try {
+        status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
+      } catch (e) {
+        // If polling fails, still return the transactionId and pending status
+        console.warn('Failed to poll transaction status:', e);
+        return {
+          transactionId: canisterTransactionId.toString(),
+          status: 'pending',
+          timestamp: new Date(),
+          error: 'Status polling failed, assuming pending'
+        };
+      }
+
+      if (status && status.status) {
+        const canisterStatus = status.status;
+        let dbStatus: 'pending' | 'completed' | 'failed';
+
+        if (canisterStatus === 'Pending') {
+          dbStatus = 'pending';
+        } else if (canisterStatus === 'Completed') {
+          dbStatus = 'completed';
+        } else if (canisterStatus === 'Failed') {
+          dbStatus = 'failed';
+        } else {
+          dbStatus = 'pending';
+        }
+
+        return {
+          transactionId: canisterTransactionId.toString(),
+          status: dbStatus,
+          timestamp: new Date(),
+          blockHeight: status.index_received || status.index_to_account || status.index_to_platform
+        };
+      }
+
       return {
-        transactionId: canisterTransactionId,
-        status: response.data.status,
-        blockHeight: response.data.blockHeight,
+        transactionId: canisterTransactionId.toString(),
+        status: 'pending',
         timestamp: new Date(),
-        error: response.data.error
+        error: 'No status information available'
       };
     } catch (error) {
-      throw new IcpayError({
-        code: 'TRANSACTION_STATUS_FETCH_FAILED',
-        message: 'Failed to fetch transaction status',
-        details: error
-      });
+      console.error('Error getting transaction status:', error);
+      throw error;
     }
   }
 
@@ -410,7 +445,7 @@ export class Icpay {
       // Use the transaction ID returned by the notification, not the block index
       let status: any = null;
       try {
-        status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
+        status = await this.pollTransactionStatus(this.icpayCanisterId!, parseInt(canisterTransactionId), 2000, 30);
       } catch (e) {
         // If polling fails, still return the transactionId and pending status
         status = { status: 'pending' };
@@ -503,7 +538,7 @@ export class Icpay {
   /**
    * Poll for transaction status using anonymous actor (no signature required)
    */
-  async pollTransactionStatus(canisterId: string, transactionId: string, intervalMs = 2000, maxAttempts = 30): Promise<any> {
+  async pollTransactionStatus(canisterId: string, transactionId: number, intervalMs = 2000, maxAttempts = 30): Promise<any> {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         let status = await this.getTransactionStatusFromCanister(canisterId, transactionId);
@@ -552,7 +587,7 @@ export class Icpay {
   /**
    * Fetch transaction status from the canister using agent-js
    */
-  async getTransactionStatusFromCanister(canisterId: string, transactionId: string): Promise<any> {
+  async getTransactionStatusFromCanister(canisterId: string, transactionId: number): Promise<any> {
     // Create anonymous actor for canister queries (no signature required)
     const agent = new HttpAgent({ host: this.icHost });
     const actor = Actor.createActor(icpayIdl, { agent, canisterId });
@@ -620,7 +655,7 @@ export class Icpay {
   /**
    * Get transaction by ID using get_transactions filter (alternative to get_transaction)
    */
-  async getTransactionByFilter(transactionId: string): Promise<any> {
+  async getTransactionByFilter(transactionId: number): Promise<any> {
     try {
       if (!this.icpayCanisterId) {
         await this.fetchAccountInfo();
@@ -630,19 +665,23 @@ export class Icpay {
       const agent = new HttpAgent({ host: this.icHost });
       const actor = Actor.createActor(icpayIdl, { agent, canisterId: this.icpayCanisterId! });
 
+      // Convert string transaction ID to Nat
+      const transactionIdNat = BigInt(transactionId);
+
       // Get all transactions and filter by ID
       const result = await (actor as any).get_transactions({
         account_canister_id: [], // Use empty array instead of null
         ledger_canister_id: [], // Use empty array instead of null
         from_timestamp: [], // Use empty array instead of null
         to_timestamp: [], // Use empty array instead of null
+        from_id: [], // Use empty array instead of null
         status: [], // Use empty array instead of null
         limit: [], // Use empty array instead of 100 for optional nat32
         offset: [] // Use empty array instead of 0 for optional nat32
       });
 
       if (result && result.transactions) {
-        const transaction = result.transactions.find((tx: any) => tx.id === transactionId);
+        const transaction = result.transactions.find((tx: any) => tx.id.toString() === transactionId.toString());
         return transaction;
       }
 

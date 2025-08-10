@@ -76,10 +76,11 @@ export type Result = { 'Ok' : null } |
 export type Result_1 = { 'Ok' : string } |
   { 'Err' : string };
 export interface Transaction {
-  'id' : string,
+  'id' : bigint,
   'status' : TransactionStatus,
   'account_canister_id' : bigint,
   'platform_fee_amount' : bigint,
+  'transfer_fee' : bigint,
   'recipient' : LedgerAccount,
   'index_to_account' : [] | [bigint],
   'timestamp_to_account' : [] | [bigint],
@@ -97,6 +98,7 @@ export interface TransactionFilter {
   'from_timestamp' : [] | [bigint],
   'status' : [] | [TransactionStatus],
   'account_canister_id' : [] | [bigint],
+  'from_id' : [] | [bigint],
   'offset' : [] | [number],
   'limit' : [] | [number],
   'to_timestamp' : [] | [bigint],
@@ -126,17 +128,19 @@ export interface _SERVICE {
   >,
   'get_canister_info' : ActorMethod<[], CanisterMetrics>,
   'get_controller' : ActorMethod<[], Principal>,
+  'get_controllers' : ActorMethod<[], Array<Principal>>,
   'get_ledger_transactions' : ActorMethod<
     [string, [] | [number], [] | [number]],
     TransactionResult
   >,
   'get_platform_wallet' : ActorMethod<[], string>,
-  'get_transaction' : ActorMethod<[string], [] | [Transaction]>,
+  'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
   'get_transactions' : ActorMethod<[TransactionFilter], TransactionResult>,
   'icrc21_canister_call_consent_message' : ActorMethod<
     [Icrc21ConsentMessageRequest],
     Icrc21ConsentMessageResponse
   >,
+  'initialize_controllers' : ActorMethod<[], Result>,
   'list_accounts' : ActorMethod<[], Array<AccountRecord>>,
   'notify_ledger_transaction' : ActorMethod<
     [LedgerTransactionNotification],
@@ -146,6 +150,7 @@ export interface _SERVICE {
   'set_controller' : ActorMethod<[Principal], Result>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
+  'update_controllers' : ActorMethod<[], Result>,
   'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_1>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
