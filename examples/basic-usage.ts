@@ -30,15 +30,13 @@ async function example() {
       symbol: ledger.symbol,
       canisterId: ledger.canisterId,
       decimals: ledger.decimals,
-      verified: ledger.verified
+      verified: ledger.verified,
+      currentPrice: ledger.currentPrice,
+      priceFetchMethod: ledger.priceFetchMethod,
+      lastPriceUpdate: ledger.lastPriceUpdate
     })));
 
-    // 3. Get canister information
-    console.log('\nFetching canister info...');
-    const canisterInfo = await icpay.getCanisterInfo();
-    console.log('Canister Info:', canisterInfo);
-
-    // 4. Show available wallet providers
+    // 3. Show available wallet providers
     console.log('\nAvailable wallet providers:');
     const providers = icpay.getWalletProviders();
     providers.forEach(provider => {
@@ -46,7 +44,7 @@ async function example() {
       console.log(`- ${provider.name} (${provider.id}): ${isAvailable ? 'Available' : 'Not Available'}`);
     });
 
-    // 5. Connect to a wallet (example with Internet Identity)
+    // 4. Connect to a wallet (example with Internet Identity)
     console.log('\nConnecting to Internet Identity...');
     const connectionResult = await icpay.connectWallet('internet-identity');
     console.log('Wallet Connected:', {
@@ -55,33 +53,43 @@ async function example() {
       connected: connectionResult.connected
     });
 
-    // 6. Get wallet balance
+    // 5. Get wallet balance
     console.log('\nFetching wallet balance...');
     const balance = await icpay.getBalance();
     console.log('Wallet Balance:', balance);
 
-    // 7. Create a payment transaction
-    console.log('\nCreating payment transaction...');
-    const paymentRequest = {
-      amount: 20.40, // 20.40 ICP
-      currency: 'ICP',
+    // 6. Send funds example
+    console.log('\nSending funds...');
+    const transaction = await icpay.sendFunds({
       ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai', // ICP ledger canister ID
-      accountCanisterId: businessAccount.accountCanisterId,
-      description: 'Payment for services',
+      amount: '10000000', // 0.1 ICP in e8s
       metadata: {
         orderId: 'order-123',
         customerEmail: 'customer@example.com'
       }
-    };
-
-    const transaction = await icpay.createPayment(paymentRequest);
-    console.log('Payment Transaction Created:', {
+    });
+    console.log('Transaction Sent:', {
       transactionId: transaction.transactionId,
+      status: transaction.status,
       amount: transaction.amount,
-      token: transaction.token,
-      recipientCanister: transaction.recipientCanister,
-      description: transaction.description,
-      metadata: transaction.metadata
+      timestamp: transaction.timestamp
+    });
+
+    // 7. Send funds with USD amount
+    console.log('\nSending funds with USD amount...');
+    const usdTransaction = await icpay.sendFundsUsd({
+      usdAmount: 5.61, // $5.61 USD
+      ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
+      metadata: {
+        orderId: 'order-124',
+        customerEmail: 'customer@example.com'
+      }
+    });
+    console.log('USD Transaction Sent:', {
+      transactionId: usdTransaction.transactionId,
+      status: usdTransaction.status,
+      amount: usdTransaction.amount,
+      timestamp: usdTransaction.timestamp
     });
 
     // 8. Check transaction status
@@ -98,14 +106,6 @@ async function example() {
     console.log('\nDisconnecting wallet...');
     await icpay.disconnectWallet();
     console.log('Wallet disconnected');
-
-    // 11. Example: Notify canister about a ledger transaction and handle transaction_id
-    // (Assuming you have a canister client and can call notify_ledger_transaction)
-    // const notifyResult = await icpay.notifyLedgerTransaction({
-    //   ledgerCanisterId: 'your-ledger-canister-id',
-    //   blockIndex: 123
-    // });
-    // console.log('Notify result (transaction_id):', notifyResult);
 
   } catch (error) {
     console.error('Error:', error);
@@ -128,17 +128,14 @@ async function walletModalExample() {
     if (result.connected) {
       console.log('Successfully connected to:', result.provider);
 
-      // Now you can create payments
-      const businessAccount = await icpay.getAccountInfo();
-      const payment = await icpay.createPayment({
-        amount: 10.50,
-        currency: 'ICP',
+      // Now you can send funds
+      const transaction = await icpay.sendFunds({
         ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
-        accountCanisterId: businessAccount.accountCanisterId,
-        description: 'Test payment'
+        amount: '10000000', // 0.1 ICP in e8s
+        metadata: { description: 'Test payment' }
       });
 
-      console.log('Payment created:', payment);
+      console.log('Transaction sent:', transaction);
     }
   } catch (error) {
     console.error('Modal Error:', error);
@@ -153,27 +150,29 @@ async function ledgerExamples() {
   });
 
   try {
-    const businessAccount = await icpay.getAccountInfo();
     const verifiedLedgers = await icpay.getVerifiedLedgers();
 
-    // Example with ICP (sent to our canister's account on ICP ledger)
-    const icpPayment = await icpay.createPayment({
-      amount: 5.25,
-      currency: 'ICP',
+    // Example with ICP
+    const icpTransaction = await icpay.sendFunds({
       ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai', // ICP ledger
-      accountCanisterId: businessAccount.accountCanisterId,
-      description: 'ICP payment'
+      amount: '525000000', // 5.25 ICP in e8s
+      metadata: { description: 'ICP payment' }
     });
 
-    // Example with ICPAY_TEST (sent directly to our canister ID)
-    const icpayTestLedger = verifiedLedgers.find(l => l.symbol === 'ICPay');
+    // Example with USD amount
+    const usdTransaction = await icpay.sendFundsUsd({
+      usdAmount: 5.25,
+      ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
+      metadata: { description: 'USD payment' }
+    });
+
+    // Example with another ledger (if available)
+    const icpayTestLedger = verifiedLedgers.find(l => l.symbol === 'ICPAY_TEST');
     if (icpayTestLedger) {
-      const icpayTestPayment = await icpay.createPayment({
-        amount: 100,
-        currency: 'ICPAY_TEST',
+      const icpayTestTransaction = await icpay.sendFunds({
         ledgerCanisterId: icpayTestLedger.canisterId,
-        accountCanisterId: businessAccount.accountCanisterId,
-        description: 'ICPay test payment'
+        amount: '100000000', // 1 ICPAY_TEST token
+        metadata: { description: 'ICPay test payment' }
       });
     }
 

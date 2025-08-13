@@ -4,7 +4,18 @@ Official SDK for Internet Computer payments with account-based authentication an
 
 ## Version History
 
-### v1.2.0 (Upcoming)
+### v1.3.0 (Latest)
+- ✅ **Public/Private API Separation** - Support for both publishable and secret keys
+- ✅ **Frontend-Safe Operations** - Public methods for client-side applications
+- ✅ **Enhanced Balance Management** - Fetch balances for all ledgers or single ledgers
+- ✅ **Price Calculation** - Convert USD amounts to token amounts with real-time pricing
+- ✅ **USD-Based Payments** - Send funds using USD amounts with automatic token conversion
+- ✅ **Transaction History** - Get detailed transaction history with filtering
+- ✅ **Enhanced Ledger Information** - Detailed ledger data including price information
+- ✅ **Account Wallet Balances** - Get account wallet balances from API
+- ✅ **Price-Aware Balance Display** - Balances with USD values when prices are available
+
+### v1.2.0
 - ✅ **Plug N Play wallet integration** (optional, built-in modal)
 - ✅ **External wallet injection** (bring your own wallet, must implement required methods)
 - ✅ **Ledger transaction support** (send funds to canister using connected wallet)
@@ -24,117 +35,329 @@ Official SDK for Internet Computer payments with account-based authentication an
 npm install @icpay/sdk
 ```
 
+## Authentication Modes
+
+The SDK supports two authentication modes:
+
+### Public Mode (Frontend-Safe)
+Use `publishableKey` for client-side applications:
+
+```typescript
+const icpay = new Icpay({
+  publishableKey: 'pk_live_your_publishable_key_here',
+  environment: 'production'
+});
+```
+
+**Available in Public Mode:**
+- `getAccountInfo()` - Basic account information
+- `getVerifiedLedgers()` - Ledger list with prices
+- `getLedgerInfo()` - Individual ledger details
+- `getAllLedgersWithPrices()` - All ledgers with pricing
+- `calculateTokenAmountFromUSD()` - Price calculations
+- `getAllLedgerBalances()` - All ledger balances (with connected wallet)
+- `getSingleLedgerBalance()` - Single ledger balance (with connected wallet)
+- `sendFunds()` - Send funds to canister
+- `sendFundsUsd()` - Send funds using USD amounts
+- Wallet connection and balance checking (with connected wallet)
+
+### Private Mode (Server-Side)
+Use `secretKey` and `accountId` for server-side operations:
+
+```typescript
+const icpay = new Icpay({
+  secretKey: 'sk_live_your_secret_key_here',
+  accountId: 'your-account-id',
+  environment: 'production'
+});
+```
+
+**Available in Private Mode:**
+- All public methods
+- `getTransactionHistory()` - Transaction data
+- `getAccountWalletBalances()` - Detailed balance info
+
 ## Quick Start
 
+### Frontend Usage (Public Mode)
 ```typescript
 import Icpay from '@icpay/sdk';
 
 const icpay = new Icpay({
-  secretKey: 'your-account-secret-key',
-  accountId: 'your-account-id',
-  environment: 'development', // or 'production'
-  apiUrl: 'http://localhost:6201', // Your API URL
-  icHost: 'http://localhost:8080', // Your IC replica or boundary node (NEW)
-  // ...other config
+  publishableKey: 'pk_live_your_publishable_key_here',
+  environment: 'production'
 });
 
-// Example: Send funds to ICP ledger (principal will be converted to AccountIdentifier automatically)
-const tx = await icpay.sendFunds({
-  ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai', // ICP ledger
-  toAddress: '727vn-fbcbl-r6jxr-soldf-cjr75-43oqc-u43ww-fpjua-mg4uz-u2mdz-kqe', // principal string
-  amount: '100000000', // e8s
-  currency: 'ICP',
-  metadata: {}
+// Safe for client-side
+const accountInfo = await icpay.getAccountInfo();
+const ledgers = await icpay.getVerifiedLedgers();
+const priceCalc = await icpay.calculateTokenAmountFromUSD({
+  usdAmount: 100,
+  ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai'
 });
 
-// Example: Send funds to ICRC-1 ledger (principal used directly)
-const tx2 = await icpay.sendFunds({
-  ledgerCanisterId: 'iyedx-sqaaa-aaaak-quksq-cai', // ICRC-1 ledger
-  toAddress: '727vn-fbcbl-r6jxr-soldf-cjr75-43oqc-u43ww-fpjua-mg4uz-u2mdz-kqe',
-  amount: '100000000',
-  currency: 'ICPAY_TEST',
-  metadata: {}
+// Connect wallet for balance and transaction operations
+await icpay.connectWallet('internet-identity');
+const balances = await icpay.getAllLedgerBalances();
+const tx = await icpay.sendFundsUsd({
+  usdAmount: 5.61,
+  ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai'
 });
-
-console.log('ICP Ledger TX:', tx);
-console.log('ICRC-1 Ledger TX:', tx2);
 ```
 
-## Wallet Integration
+### Backend Usage (Private Mode)
+```typescript
+import Icpay from '@icpay/sdk';
 
-### Built-in Plug N Play
-- Set `usePlugNPlay: true` in config to use the SDK's built-in wallet modal (Plug, II, OISY, etc).
-- Pass `plugNPlayConfig` for advanced options.
+const icpay = new Icpay({
+  secretKey: 'sk_live_your_secret_key_here',
+  accountId: 'your-account-id',
+  environment: 'production',
+  icHost: 'https://ic0.app'
+});
 
-### External Wallet Injection
-- Pass `externalWallet` in config (must implement `getPrincipal()`, `sign()`, etc).
-- The SDK will use your wallet for all ledger transactions.
+// Server-side operations
+const transactions = await icpay.getTransactionHistory();
+const accountBalances = await icpay.getAccountWalletBalances();
+```
 
-## Canister Integration (agent-js)
+## Enhanced Features
 
-The SDK uses [@dfinity/agent](https://www.npmjs.com/package/@dfinity/agent) to call your canister's `get_transaction` and to send ledger transactions. The `icHost` config option controls which IC network is used (local, mainnet, etc).
+### 1. Balance Management
+
+#### Get All Ledger Balances
+Fetch balances for all verified ledgers for the connected wallet:
+
+```typescript
+// Connect wallet first
+await icpay.connectWallet('internet-identity');
+
+// Get all balances
+const allBalances = await icpay.getAllLedgerBalances();
+console.log('Total USD Value:', allBalances.totalBalancesUSD);
+console.log('Balances:', allBalances.balances.map(b => ({
+  symbol: b.ledgerSymbol,
+  balance: b.formattedBalance,
+  usdValue: b.currentPrice ?
+    (parseFloat(b.formattedBalance) * b.currentPrice).toFixed(2) : 'N/A'
+})));
+```
+
+#### Get Single Ledger Balance
+Fetch balance for a specific ledger:
+
+```typescript
+const icpBalance = await icpay.getSingleLedgerBalance('ryjl3-tyaaa-aaaaa-aaaba-cai');
+console.log('ICP Balance:', {
+  balance: icpBalance.formattedBalance,
+  usdValue: icpBalance.currentPrice ?
+    (parseFloat(icpBalance.formattedBalance) * icpBalance.currentPrice).toFixed(2) : 'N/A'
+});
+```
+
+### 2. Price Calculation
+
+Convert USD amounts to token amounts using real-time pricing:
+
+```typescript
+const priceCalculation = await icpay.calculateTokenAmountFromUSD({
+  usdAmount: 100, // $100 USD
+  ledgerCanisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai' // ICP ledger
+});
+
+console.log('Token Amount:', {
+  humanReadable: priceCalculation.tokenAmountHuman, // "1.5 ICP"
+  inDecimals: priceCalculation.tokenAmountDecimals, // "150000000"
+  currentPrice: priceCalculation.currentPrice,
+  priceTimestamp: priceCalculation.priceTimestamp
+});
+```
+
+### 3. Transaction History
+
+Get detailed transaction history with filtering:
+
+```typescript
+const history = await icpay.getTransactionHistory({
+  limit: 20,
+  offset: 0,
+  status: 'completed',
+  fromTimestamp: new Date('2024-01-01'),
+  toTimestamp: new Date()
+});
+
+console.log('Transactions:', history.transactions.map(tx => ({
+  id: tx.id,
+  amount: tx.amount,
+  currency: tx.currency,
+  status: tx.status,
+  createdAt: tx.createdAt
+})));
+```
+
+
+### 7. Enhanced Ledger Information
+
+Get detailed ledger information including price data:
+
+```typescript
+const ledgerInfo = await icpay.getLedgerInfo('ryjl3-tyaaa-aaaaa-aaaba-cai');
+console.log('Ledger Info:', {
+  name: ledgerInfo.name,
+  symbol: ledgerInfo.symbol,
+  currentPrice: ledgerInfo.currentPrice,
+  priceFetchMethod: ledgerInfo.priceFetchMethod,
+  lastPriceUpdate: ledgerInfo.lastPriceUpdate
+});
+```
+
+### 8. Account Wallet Balances
+
+Get account wallet balances from API (not connected wallet):
+
+```typescript
+const accountBalances = await icpay.getAccountWalletBalances();
+console.log('Account Balances:', {
+  totalBalancesUSD: accountBalances.totalBalancesUSD,
+  balances: accountBalances.balances.map(b => ({
+    symbol: b.ledgerSymbol,
+    balance: b.formattedBalance,
+    currentPrice: b.currentPrice
+  }))
+});
+```
 
 ## API Reference
 
-### Authentication
-The SDK uses account-based authentication with secret keys:
-- `secretKey`: Your account's secret key
-- `accountId`: Your account ID (optional, for additional validation)
+### Public Methods (Frontend-Safe)
 
-### Methods
+#### `getAccountInfo(): Promise<AccountInfo | PublicAccountInfo>`
+Get account information (limited data in public mode, full data in private mode).
 
-#### `sendFunds(request)`
-Send funds to a canister using the connected wallet. Handles ICP ledger and ICRC-1 ledgers automatically.
+#### `getVerifiedLedgers(): Promise<VerifiedLedger[]>`
+Get verified ledgers with price information.
 
-#### `pollTransactionStatus(canisterId, transactionId, intervalMs, maxAttempts)`
-Poll the canister for transaction status until completed.
+#### `getLedgerInfo(ledgerCanisterId: string): Promise<LedgerInfo>`
+Get detailed ledger information including price data.
 
-#### `getTransactionStatusFromCanister(canisterId, transactionId)`
-Fetch transaction status from the canister using agent-js.
+#### `getAllLedgersWithPrices(): Promise<LedgerInfo[]>`
+Get all ledgers with price information.
 
-## Types
+#### `calculateTokenAmountFromUSD(request: PriceCalculationRequest): Promise<PriceCalculationResult>`
+Calculate token amount from USD price for a specific ledger.
 
-### ExternalWallet
+#### `getAllLedgerBalances(): Promise<AllLedgerBalances>`
+Get balance for all verified ledgers for the connected wallet.
+
+#### `getSingleLedgerBalance(ledgerCanisterId: string): Promise<LedgerBalance>`
+Get balance for a specific ledger by canister ID.
+
+#### `sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse>`
+Send funds to a specific canister/ledger. The currency symbol is automatically determined from the ledger. If `accountCanisterId` is not provided, it will be automatically fetched from the API.
+
+#### `sendFundsUsd(request: SendFundsUsdRequest): Promise<TransactionResponse>`
+Send funds using USD amount with automatic token conversion. If `accountCanisterId` is not provided, it will be automatically fetched from the API.
+
+### Private Methods (Server-Side Only)
+
+#### `getTransactionHistory(request?: TransactionHistoryRequest): Promise<TransactionHistoryResponse>`
+Get transaction history for the account with optional filtering.
+
+#### `getAccountWalletBalances(): Promise<AllLedgerBalances>`
+Get account wallet balances from API.
+
+### Types
+
+#### `LedgerBalance`
 ```typescript
-interface ExternalWallet {
-  getPrincipal(): string;
-  sign(...args: any[]): Promise<any>;
+interface LedgerBalance {
+  ledgerId: string;
+  ledgerName: string;
+  ledgerSymbol: string;
+  canisterId: string;
+  balance: string; // Raw balance in smallest unit
+  formattedBalance: string; // Human readable balance
+  decimals: number;
+  currentPrice?: number; // USD price if available
+  priceFetchMethod?: string;
+  lastPriceUpdate?: Date;
+  lastUpdated: Date;
 }
 ```
 
+#### `PriceCalculationResult`
+```typescript
+interface PriceCalculationResult {
+  usdAmount: number;
+  ledgerCanisterId: string;
+  ledgerSymbol: string;
+  ledgerName: string;
+  currentPrice: number;
+  priceTimestamp: Date;
+  priceFetchMethod: string;
+  tokenAmountHuman: string; // Human readable amount (e.g., "1.5 ICP")
+  tokenAmountDecimals: string; // Amount in smallest unit (e.g., "150000000")
+  decimals: number;
+}
+```
+
+#### `SendFundsUsdRequest`
+```typescript
+interface SendFundsUsdRequest {
+  usdAmount: string | number;
+  ledgerCanisterId: string;
+  accountCanisterId?: string; // Optional, will be fetched if not provided
+  metadata?: Record<string, any>;
+}
+```
+
+## Examples
+
+See the `examples/` directory for comprehensive usage examples:
+
+- `basic-usage.ts` - Basic SDK functionality
+- `public-usage.ts` - Frontend-safe operations with publishable key
+- `enhanced-usage.ts` - Server-side operations with secret key
+
 ## Error Handling
 
-The SDK throws `IcpayError` for all errors:
+The SDK uses a consistent error handling pattern:
 
 ```typescript
 try {
-  const tx = await icpay.sendFunds({ ... });
+  const balances = await icpay.getAllLedgerBalances();
 } catch (error) {
   if (error instanceof IcpayError) {
-    console.error(error.code, error.message);
+    console.error('ICPay Error:', error.code, error.message);
+  } else {
+    console.error('Unexpected error:', error);
   }
 }
 ```
 
-## Development
+## Configuration
 
-```bash
-# Install dependencies
-npm install
+```typescript
+interface IcpayConfig {
+  // For public operations (frontend-safe)
+  publishableKey?: string;
 
-# Build
-npm run build
+  // For private operations (server-side only)
+  secretKey?: string;
+  accountId?: string;
 
-# Development mode
-npm run dev
-
-# Test
-npm test
-
-# Lint
-npm run lint
+  environment?: 'development' | 'production';
+  apiUrl?: string;
+  icHost?: string;
+  usePlugNPlay?: boolean;
+  plugNPlayConfig?: Record<string, any>;
+  externalWallet?: ExternalWallet;
+  actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
+}
 ```
 
-## License
+**Note:** Either `publishableKey` (public mode) or `secretKey` + `accountId` (private mode) must be provided.
 
-MIT
+## Support
+
+For support and questions, please refer to the ICPay documentation or contact the development team.
