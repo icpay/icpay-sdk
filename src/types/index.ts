@@ -35,8 +35,6 @@ export interface VerifiedLedger {
   standard: string;
   decimals: number;
   logoUrl: string | null;
-  supportsNotify: boolean;
-  notifyMethod: string | null;
   verified: boolean;
   fee: string | null;
   network: string;
@@ -112,7 +110,7 @@ export interface TransactionStatus {
 
 export interface WebhookEvent {
   id: string;
-  type: 'transaction.completed' | 'transaction.failed' | 'account.created';
+  type: 'transaction.completed' | 'transaction.failed';
   data: any;
   timestamp: Date;
 }
@@ -251,8 +249,6 @@ export interface LedgerInfo {
   standard: string;
   decimals: number;
   logoUrl?: string;
-  supportsNotify: boolean;
-  notifyMethod?: string;
   verified: boolean;
   fee?: string;
   network: string;
