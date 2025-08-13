@@ -4,7 +4,6 @@ import Icpay from '../src/index';
 async function testEnhancedBalanceFeatures() {
   const icpay = new Icpay({
     secretKey: 'your-secret-key',
-    accountId: 'your-account-id',
     environment: 'development',
     apiUrl: 'http://localhost:6201',
     icHost: 'http://localhost:8080'
@@ -20,7 +19,6 @@ async function testEnhancedBalanceFeatures() {
       symbol: ledger.symbol,
       canisterId: ledger.canisterId,
       currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod,
       lastPriceUpdate: ledger.lastPriceUpdate
     })));
 
@@ -30,8 +28,7 @@ async function testEnhancedBalanceFeatures() {
     console.log('All Ledgers with Prices:', allLedgersWithPrices.map(ledger => ({
       symbol: ledger.symbol,
       canisterId: ledger.canisterId,
-      currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod
+      currentPrice: ledger.currentPrice
     })));
 
     // 3. Test price calculation
@@ -49,8 +46,7 @@ async function testEnhancedBalanceFeatures() {
         currentPrice: priceCalculation.currentPrice,
         tokenAmountHuman: priceCalculation.tokenAmountHuman,
         tokenAmountDecimals: priceCalculation.tokenAmountDecimals,
-        priceTimestamp: priceCalculation.priceTimestamp,
-        priceFetchMethod: priceCalculation.priceFetchMethod
+        priceTimestamp: priceCalculation.priceTimestamp
       });
     } catch (error) {
       console.log('Price calculation failed (expected if no price data):', error.message);
@@ -65,7 +61,6 @@ async function testEnhancedBalanceFeatures() {
         symbol: ledgerInfo.symbol,
         canisterId: ledgerInfo.canisterId,
         currentPrice: ledgerInfo.currentPrice,
-        priceFetchMethod: ledgerInfo.priceFetchMethod,
         lastPriceUpdate: ledgerInfo.lastPriceUpdate
       });
     } catch (error) {

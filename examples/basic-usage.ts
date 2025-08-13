@@ -5,7 +5,6 @@ async function example() {
   // Initialize the SDK with your account credentials
   const icpay = new Icpay({
     secretKey: 'your-secret-key',
-    accountId: 'your-account-id',
     environment: 'development', // or 'production'
     apiUrl: 'https://api.icpay.com' // optional, defaults to production URL
   });
@@ -32,7 +31,6 @@ async function example() {
       decimals: ledger.decimals,
       verified: ledger.verified,
       currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod,
       lastPriceUpdate: ledger.lastPriceUpdate
     })));
 
@@ -52,11 +50,6 @@ async function example() {
       principal: connectionResult.principal,
       connected: connectionResult.connected
     });
-
-    // 5. Get wallet balance
-    console.log('\nFetching wallet balance...');
-    const balance = await icpay.getBalance();
-    console.log('Wallet Balance:', balance);
 
     // 6. Send funds example
     console.log('\nSending funds...');
@@ -115,8 +108,7 @@ async function example() {
 // Example of using the wallet modal
 async function walletModalExample() {
   const icpay = new Icpay({
-    secretKey: 'your-secret-key',
-    accountId: 'your-account-id'
+    secretKey: 'your-secret-key'
   });
 
   try {
@@ -145,8 +137,7 @@ async function walletModalExample() {
 // Example of handling different ledger types
 async function ledgerExamples() {
   const icpay = new Icpay({
-    secretKey: 'your-secret-key',
-    accountId: 'your-account-id'
+    secretKey: 'your-secret-key'
   });
 
   try {

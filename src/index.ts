@@ -7,7 +7,6 @@ import {
   PublicAccountInfo,
   VerifiedLedger,
   WalletConnectionResult,
-  CanisterInfo,
   AllLedgerBalances,
   LedgerBalance,
   PriceCalculationRequest,
@@ -31,8 +30,7 @@ export class Icpay {
   private wallet: IcpayWallet;
   private publicApiClient: AxiosInstance;
   private privateApiClient: AxiosInstance | null = null;
-  private canisterInfo: CanisterInfo | null = null;
-  private externalWallet: any = null;
+  private connectedWallet: any = null;
   private usePlugNPlay: boolean = false;
   private plugNPlayConfig: Record<string, any> = {};
   private icHost: string;
@@ -53,13 +51,13 @@ export class Icpay {
     }
 
     this.icHost = config.icHost || 'https://ic0.app';
-    this.externalWallet = config.externalWallet || null;
+    this.connectedWallet = config.connectedWallet || null;
     this.usePlugNPlay = !!config.usePlugNPlay;
     this.plugNPlayConfig = config.plugNPlayConfig || {};
     this.actorProvider = config.actorProvider;
 
-    if (this.externalWallet) {
-      this.wallet = new IcpayWallet({ externalWallet: this.externalWallet });
+    if (this.connectedWallet) {
+      this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
     } else if (this.usePlugNPlay) {
       this.wallet = new IcpayWallet({ usePlugNPlay: true, plugNPlayConfig: this.plugNPlayConfig });
     } else {
@@ -81,10 +79,6 @@ export class Icpay {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.config.secretKey}`
       };
-
-      if (this.config.accountId) {
-        privateHeaders['X-Account-ID'] = this.config.accountId;
-      }
 
       this.privateApiClient = axios.create({
         baseURL: this.config.apiUrl,
@@ -112,17 +106,7 @@ export class Icpay {
     }
   }
 
-  /**
-   * Require account ID for private operations
-   */
-  private requireAccountId(methodName: string): void {
-    if (!this.config.accountId) {
-      throw new IcpayError({
-        code: 'ACCOUNT_ID_REQUIRED',
-        message: `${methodName} requires accountId to be provided in configuration.`
-      });
-    }
-  }
+
 
   /**
    * Get account information (public method - limited data)
@@ -139,7 +123,6 @@ export class Icpay {
         isLive: account.isLive,
         accountCanisterId: account.accountCanisterId,
         walletAddress: account.walletAddress,
-        walletCurrency: account.walletCurrency,
         createdAt: new Date(account.createdAt),
         updatedAt: new Date(account.updatedAt)
       };
@@ -157,7 +140,6 @@ export class Icpay {
    */
   async getDetailedAccountInfo(): Promise<AccountInfo> {
     this.requireSecretKey('getDetailedAccountInfo');
-    this.requireAccountId('getDetailedAccountInfo');
 
     try {
       const response = await this.privateApiClient!.get('/sdk/account');
@@ -171,8 +153,6 @@ export class Icpay {
         isLive: account.isLive,
         accountCanisterId: account.accountCanisterId,
         walletAddress: account.walletAddress,
-        walletBalance: account.walletBalance,
-        walletCurrency: account.walletCurrency,
         createdAt: new Date(account.createdAt),
         updatedAt: new Date(account.updatedAt)
       };
@@ -196,21 +176,13 @@ export class Icpay {
         name: ledger.name,
         symbol: ledger.symbol,
         canisterId: ledger.canisterId,
-        standard: ledger.standard,
         decimals: ledger.decimals,
         logoUrl: ledger.logoUrl,
-        supportsNotify: ledger.supportsNotify,
-        notifyMethod: ledger.notifyMethod,
         verified: ledger.verified,
         fee: ledger.fee,
-        network: ledger.network,
-        description: ledger.description,
         // Price-related fields
         currentPrice: ledger.currentPrice || null,
-        priceFetchMethod: ledger.priceFetchMethod || null,
-        lastPriceUpdate: ledger.lastPriceUpdate || null,
-        createdAt: new Date(ledger.createdAt),
-        updatedAt: new Date(ledger.updatedAt)
+        lastPriceUpdate: ledger.lastPriceUpdate || null
       }));
     } catch (error) {
       throw new IcpayError({
@@ -230,7 +202,6 @@ export class Icpay {
    */
   async getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus> {
     this.requireSecretKey('getTransactionStatus');
-    this.requireAccountId('getTransactionStatus');
 
     try {
       const response = await this.privateApiClient!.get(`/sdk/transactions/${canisterTransactionId}/status`);
@@ -319,25 +290,18 @@ export class Icpay {
   }
 
   /**
-   * Get the balance of the connected wallet
-   */
-  async getBalance() {
-    return await this.wallet.getBalance();
-  }
-
-  /**
    * Get balance for a specific ledger canister
    */
   async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
     try {
-      // Extract principal from external wallet
+      // Extract principal from connected wallet
       let principal: string | null = null;
 
-      if (this.externalWallet) {
-        if (this.externalWallet.owner) {
-          principal = this.externalWallet.owner;
-        } else if (this.externalWallet.principal) {
-          principal = this.externalWallet.principal;
+      if (this.connectedWallet) {
+        if (this.connectedWallet.owner) {
+          principal = this.connectedWallet.owner;
+        } else if (this.connectedWallet.principal) {
+          principal = this.connectedWallet.principal;
         }
       }
 
@@ -391,7 +355,7 @@ export class Icpay {
 
   /**
    * Send funds to a specific canister/ledger (public method)
-   * This is now a real transaction, not mock data.
+   * This is now a real transaction
    */
   async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
     try {
@@ -416,7 +380,6 @@ export class Icpay {
 
 
       // Check balance before sending
-      const balance = await this.getBalance();
       const requiredAmount = amount;
 
       // Helper function to make amounts human-readable
@@ -428,7 +391,7 @@ export class Icpay {
         return `${whole}${fractionStr ? '.' + fractionStr : ''} ${symbol}`.trim();
       };
 
-              // Check if user has sufficient balance based on ledger type
+        // Check if user has sufficient balance based on ledger type
         try {
           // Get the actual balance from the specific ledger (works for all ICRC ledgers including ICP)
           const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
@@ -444,29 +407,11 @@ export class Icpay {
           }
         } catch (balanceError) {
           // If we can't fetch the specific ledger balance, fall back to the old logic
-          if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
-            // ICP ledger fallback
-            if (balance.icp < requiredAmount) {
-              const requiredFormatted = formatAmount(requiredAmount, 8, 'ICP');
-              const availableFormatted = formatAmount(BigInt(balance.icp), 8, 'ICP');
-              throw new IcpayError({
-                code: 'INSUFFICIENT_BALANCE',
-                message: `Insufficient ICP balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
-                details: { required: requiredAmount, available: balance.icp }
-              });
-            }
-          } else {
-            // Other ledgers fallback
-            if (balance.icpayTest < requiredAmount) {
-              const requiredFormatted = formatAmount(requiredAmount, 8, 'tokens');
-              const availableFormatted = formatAmount(BigInt(balance.icpayTest), 8, 'tokens');
-              throw new IcpayError({
-                code: 'INSUFFICIENT_BALANCE',
-                message: `Insufficient token balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
-                details: { required: requiredAmount, available: balance.icpayTest }
-              });
-            }
-          }
+          throw new IcpayError({
+            code: 'INSUFFICIENT_BALANCE',
+            message: 'Insufficient balance',
+            details: { required: requiredAmount, available: 0 }
+          });
         }
 
       let transferResult;
@@ -814,7 +759,6 @@ export class Icpay {
             formattedBalance,
             decimals: ledger.decimals,
             currentPrice: ledger.currentPrice || undefined,
-            priceFetchMethod: ledger.priceFetchMethod || undefined,
             lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
             lastUpdated: new Date()
           };
@@ -881,7 +825,6 @@ export class Icpay {
         formattedBalance,
         decimals: ledger.decimals,
         currentPrice: ledger.currentPrice || undefined,
-        priceFetchMethod: ledger.priceFetchMethod || undefined,
         lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
         lastUpdated: new Date()
       };
@@ -941,7 +884,6 @@ export class Icpay {
         ledgerName: ledger.name,
         currentPrice: ledger.currentPrice,
         priceTimestamp: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : new Date(),
-        priceFetchMethod: ledger.priceFetchMethod || 'unknown',
         tokenAmountHuman: tokenAmountHuman.toFixed(ledger.decimals),
         tokenAmountDecimals,
         decimals: ledger.decimals
@@ -960,7 +902,6 @@ export class Icpay {
    */
   async getTransactionHistory(request: TransactionHistoryRequest = {}): Promise<TransactionHistoryResponse> {
     this.requireSecretKey('getTransactionHistory');
-    this.requireAccountId('getTransactionHistory');
     try {
       const params = new URLSearchParams();
 
@@ -1018,18 +959,12 @@ export class Icpay {
         name: ledger.name,
         symbol: ledger.symbol,
         canisterId: ledger.canisterId,
-        standard: ledger.standard,
         decimals: ledger.decimals,
         logoUrl: ledger.logoUrl || undefined,
         verified: ledger.verified,
         fee: ledger.fee || undefined,
-        network: ledger.network,
-        description: ledger.description || undefined,
         currentPrice: ledger.currentPrice || undefined,
-        priceFetchMethod: ledger.priceFetchMethod || undefined,
-        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
-        createdAt: new Date(ledger.createdAt),
-        updatedAt: new Date(ledger.updatedAt)
+        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
       };
     } catch (error) {
       throw new IcpayError({
@@ -1085,18 +1020,12 @@ export class Icpay {
         name: ledger.name,
         symbol: ledger.symbol,
         canisterId: ledger.canisterId,
-        standard: ledger.standard,
         decimals: ledger.decimals,
         logoUrl: ledger.logoUrl || undefined,
         verified: ledger.verified,
         fee: ledger.fee || undefined,
-        network: ledger.network,
-        description: ledger.description || undefined,
         currentPrice: ledger.currentPrice || undefined,
-        priceFetchMethod: ledger.priceFetchMethod || undefined,
-        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
-        createdAt: new Date(ledger.createdAt),
-        updatedAt: new Date(ledger.updatedAt)
+        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
       }));
     } catch (error) {
       throw new IcpayError({
@@ -1112,7 +1041,6 @@ export class Icpay {
    */
   async getAccountWalletBalances(): Promise<AllLedgerBalances> {
     this.requireSecretKey('getAccountWalletBalances');
-    this.requireAccountId('getAccountWalletBalances');
     try {
       const response = await this.privateApiClient!.get('/sdk/account/wallet-balances');
 
@@ -1126,7 +1054,6 @@ export class Icpay {
           formattedBalance: balance.formattedBalance,
           decimals: balance.decimals,
           currentPrice: balance.currentPrice,
-          priceFetchMethod: balance.priceFetchMethod,
           lastPriceUpdate: balance.lastPriceUpdate ? new Date(balance.lastPriceUpdate) : undefined,
           lastUpdated: new Date(balance.lastUpdated)
         })),

@@ -1,7 +1,7 @@
 import { AuthClient } from '@dfinity/auth-client';
 import { Identity } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { WalletInfo, Balance, WalletProvider, WalletConnectionResult } from './types';
+import { WalletProvider, WalletConnectionResult } from './types';
 import { IcpayError } from './errors';
 import { HttpAgent } from '@dfinity/agent';
 import { Actor } from '@dfinity/agent';
@@ -27,13 +27,13 @@ export class IcpayWallet {
   private identity: Identity | null = null;
   private principal: Principal | null = null;
   private connectedProvider: string | null = null;
-  private externalWallet: any = null;
+  private connectedWallet: any = null;
   private usePlugNPlay: boolean = false;
   private plugNPlayConfig: Record<string, any> = {};
 
-  constructor(options?: { externalWallet?: any; usePlugNPlay?: boolean; plugNPlayConfig?: Record<string, any> }) {
-    if (options?.externalWallet) {
-      this.externalWallet = options.externalWallet;
+  constructor(options?: { connectedWallet?: any; usePlugNPlay?: boolean; plugNPlayConfig?: Record<string, any> }) {
+    if (options?.connectedWallet) {
+      this.connectedWallet = options.connectedWallet;
     }
     if (options?.usePlugNPlay) {
       this.usePlugNPlay = true;
@@ -246,87 +246,6 @@ export class IcpayWallet {
   }
 
   /**
-   * Get the balance of the connected wallet
-   */
-  async getBalance(): Promise<Balance> {
-    if (!this.isConnected()) {
-      throw new IcpayError({
-        code: 'WALLET_NOT_CONNECTED',
-        message: 'Wallet is not connected'
-      });
-    }
-
-    try {
-      let principal: Principal | null = null;
-
-      // Use external wallet if available
-      if (this.externalWallet) {
-        // For Plug N Play wallets, extract principal from the account object
-        if (this.externalWallet.owner) {
-          // Convert owner string to principal
-          try {
-            principal = Principal.fromText(this.externalWallet.owner);
-          } catch (error) {
-            console.warn('[ICPay SDK] Failed to parse principal from owner:', error);
-          }
-        } else if (this.externalWallet.principal) {
-          principal = this.externalWallet.principal;
-        }
-      } else {
-        // Use internal principal
-        principal = this.principal;
-      }
-
-      if (!principal) {
-        throw new IcpayError({
-          code: 'WALLET_NOT_CONNECTED',
-          message: 'No valid principal found'
-        });
-      }
-
-      // For Plug N Play wallets, we need to use anonymous actor for balance checking
-      // since balance queries don't require signing
-      const agent = new HttpAgent({
-        host: 'https://ic0.app'
-      });
-
-      // Fetch ICP balance from the ICP ledger
-      const icpLedgerId = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-      const icpLedger = Actor.createActor(ledgerIdl, {
-        agent,
-        canisterId: icpLedgerId
-      });
-
-      let icpBalance = 0;
-      try {
-        const icpAccount = {
-          owner: principal,
-          subaccount: []
-        };
-        const icpBalanceResult = await icpLedger.icrc1_balance_of(icpAccount);
-        icpBalance = Number(icpBalanceResult);
-      } catch (error) {
-        console.warn('[ICPay SDK] Failed to fetch ICP balance:', error);
-      }
-
-      // For now, return mock data for other tokens
-      // TODO: Implement real balance fetching for other ledgers
-      const result = {
-        icp: icpBalance,
-        icpayTest: 0 // Mock data for now
-      };
-      return result;
-    } catch (error) {
-      console.error('[ICPay SDK] getBalance error:', error);
-      throw new IcpayError({
-        code: 'BALANCE_FETCH_FAILED',
-        message: 'Failed to fetch wallet balance',
-        details: error
-      });
-    }
-  }
-
-  /**
    * Disconnect from the wallet
    */
   async disconnect(): Promise<void> {
@@ -345,22 +264,22 @@ export class IcpayWallet {
    * Check if wallet is connected
    */
   isConnected(): boolean {
-    // If using an external wallet, check for various properties that indicate connection
-    if (this.externalWallet) {
+    // If using a connected wallet, check for various properties that indicate connection
+    if (this.connectedWallet) {
       // Check if it has a principal/owner property (Plug N Play style)
-      if (this.externalWallet.owner || this.externalWallet.principal) {
+      if (this.connectedWallet.owner || this.connectedWallet.principal) {
         return true;
       }
       // Check if it has getPrincipal method
-      if (typeof this.externalWallet.getPrincipal === 'function') {
+      if (typeof this.connectedWallet.getPrincipal === 'function') {
         return true;
       }
       // Check for connected property
-      if ('connected' in this.externalWallet) {
-        return !!this.externalWallet.connected;
+      if ('connected' in this.connectedWallet) {
+        return !!this.connectedWallet.connected;
       }
       // If it's a non-null object, assume it's connected
-      return this.externalWallet !== null && typeof this.externalWallet === 'object';
+      return this.connectedWallet !== null && typeof this.connectedWallet === 'object';
     }
     return this.identity !== null && this.principal !== null;
   }

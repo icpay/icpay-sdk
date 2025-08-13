@@ -6,13 +6,12 @@ export interface IcpayConfig {
 
   // For private operations (server-side only)
   secretKey?: string;
-  accountId?: string;
 
   environment?: 'development' | 'production';
   apiUrl?: string;
   usePlugNPlay?: boolean;
   plugNPlayConfig?: Record<string, any>;
-  externalWallet?: ExternalWallet;
+  connectedWallet?: ConnectedWallet;
   icHost?: string; // IC network host for agent-js
   /**
    * Optional: Provide a function to create an actor for any canister (e.g. from Plug N Play or direct agent-js)
@@ -21,10 +20,30 @@ export interface IcpayConfig {
   actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
 }
 
-export interface ExternalWallet {
-  getPrincipal(): string;
-  sign(...args: any[]): Promise<any>;
-  // Add more as needed
+export interface ConnectedWallet {
+  /**
+   * The principal/owner of the wallet (string format)
+   * Required for balance checking and transaction operations
+   */
+  owner?: string;
+
+  /**
+   * The principal of the wallet (Principal object format)
+   * Alternative to owner property
+   */
+  principal?: any; // Principal type from @dfinity/principal
+
+  /**
+   * Whether the wallet is currently connected
+   * Used to determine connection status
+   */
+  connected?: boolean;
+
+  /**
+   * Optional method to get the principal
+   * Alternative to owner/principal properties
+   */
+  getPrincipal?: () => string | any;
 }
 
 export interface VerifiedLedger {
@@ -32,28 +51,13 @@ export interface VerifiedLedger {
   name: string;
   symbol: string;
   canisterId: string;
-  standard: string;
   decimals: number;
   logoUrl: string | null;
   verified: boolean;
   fee: string | null;
-  network: string;
-  description: string | null;
   // Price-related fields
   currentPrice?: number | null;
-  priceFetchMethod?: string | null;
   lastPriceUpdate?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface WalletInfo {
-  principal: string;
-  accountId: string;
-  balance: {
-    icp: number;
-    icpayTest: number;
-  };
 }
 
 export interface WalletProvider {
@@ -73,7 +77,6 @@ export interface Transaction {
   ledgerCanisterId?: string;
   fromAddress?: string;
   toAddress: string;
-  transactionHash?: string;
   blockHeight?: string;
   fee?: string;
   metadata?: any;
@@ -108,13 +111,6 @@ export interface TransactionStatus {
   error?: string;
 }
 
-export interface WebhookEvent {
-  id: string;
-  type: 'transaction.completed' | 'transaction.failed';
-  data: any;
-  timestamp: Date;
-}
-
 export interface AccountInfo {
   id: string;
   name: string | null;
@@ -123,8 +119,6 @@ export interface AccountInfo {
   isLive: boolean;
   accountCanisterId: number;
   walletAddress: string | null;
-  walletBalance: number;
-  walletCurrency: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -136,7 +130,6 @@ export interface PublicAccountInfo {
   isLive: boolean;
   accountCanisterId: number;
   walletAddress: string | null;
-  walletCurrency: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -147,22 +140,11 @@ export interface IcpayError {
   details?: any;
 }
 
-export interface Balance {
-  icp: number;
-  icpayTest: number;
-}
-
 export interface WalletConnectionResult {
   provider: string;
   principal: string;
   accountId: string;
   connected: boolean;
-}
-
-export interface CanisterInfo {
-  canisterId: string;
-  name: string;
-  description?: string;
 }
 
 // New types for enhanced SDK functionality
@@ -176,7 +158,6 @@ export interface LedgerBalance {
   formattedBalance: string; // Human readable balance
   decimals: number;
   currentPrice?: number; // USD price if available
-  priceFetchMethod?: string;
   lastPriceUpdate?: Date;
   lastUpdated: Date;
 }
@@ -200,7 +181,6 @@ export interface PriceCalculationResult {
   ledgerName: string;
   currentPrice: number;
   priceTimestamp: Date;
-  priceFetchMethod: string;
   tokenAmountHuman: string; // Human readable amount (e.g., "1.5 ICP")
   tokenAmountDecimals: string; // Amount in smallest unit (e.g., "150000000")
   decimals: number;
@@ -246,18 +226,12 @@ export interface LedgerInfo {
   name: string;
   symbol: string;
   canisterId: string;
-  standard: string;
   decimals: number;
   logoUrl?: string;
   verified: boolean;
   fee?: string;
-  network: string;
-  description?: string;
   currentPrice?: number;
-  priceFetchMethod?: string;
   lastPriceUpdate?: Date;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface SendFundsUsdRequest {
@@ -265,13 +239,4 @@ export interface SendFundsUsdRequest {
   ledgerCanisterId: string;
   accountCanisterId?: string; // Optional, will be fetched if not provided
   metadata?: Record<string, any>;
-}
-
-export interface WebhookSubscription {
-  id: string;
-  url: string;
-  events: string[];
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
 }

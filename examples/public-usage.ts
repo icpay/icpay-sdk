@@ -22,7 +22,6 @@ async function publicExample() {
       isLive: accountInfo.isLive,
       accountCanisterId: accountInfo.accountCanisterId,
       walletAddress: accountInfo.walletAddress,
-      walletCurrency: accountInfo.walletCurrency
       // Note: email and walletBalance are not available in public mode
     });
 
@@ -36,7 +35,6 @@ async function publicExample() {
       decimals: ledger.decimals,
       verified: ledger.verified,
       currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod,
       lastPriceUpdate: ledger.lastPriceUpdate
     })));
 
@@ -47,8 +45,7 @@ async function publicExample() {
       name: ledger.name,
       symbol: ledger.symbol,
       canisterId: ledger.canisterId,
-      currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod
+      currentPrice: ledger.currentPrice
     })));
 
     // 4. Get detailed ledger information
@@ -63,7 +60,6 @@ async function publicExample() {
       decimals: ledgerInfo.decimals,
       verified: ledgerInfo.verified,
       currentPrice: ledgerInfo.currentPrice,
-      priceFetchMethod: ledgerInfo.priceFetchMethod,
       lastPriceUpdate: ledgerInfo.lastPriceUpdate
     });
 
@@ -79,8 +75,7 @@ async function publicExample() {
       currentPrice: priceCalculation.currentPrice,
       tokenAmountHuman: priceCalculation.tokenAmountHuman,
       tokenAmountDecimals: priceCalculation.tokenAmountDecimals,
-      priceTimestamp: priceCalculation.priceTimestamp,
-      priceFetchMethod: priceCalculation.priceFetchMethod
+      priceTimestamp: priceCalculation.priceTimestamp
     });
 
     // 6. Show available wallet providers (wallet methods still work)
@@ -100,11 +95,6 @@ async function publicExample() {
         principal: connectionResult.principal,
         connected: connectionResult.connected
       });
-
-      // 8. Get wallet balance (this works with connected wallet)
-      console.log('\n8. Getting wallet balance...');
-      const balance = await icpay.getBalance();
-      console.log('Wallet Balance:', balance);
 
       // 9. Get single ledger balance (this works with connected wallet)
       console.log('\n9. Getting single ledger balance...');
@@ -180,7 +170,6 @@ async function publicExample() {
     console.log('\nNote: The following operations are NOT available in public mode:');
     console.log('- getTransactionHistory()');
     console.log('- getAccountWalletBalances()');
-    console.log('- getCanisterInfo()');
 
   } catch (error) {
     console.error('Error in public example:', error);

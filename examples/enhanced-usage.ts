@@ -5,7 +5,6 @@ async function privateExample() {
   // Initialize the SDK with secret key (server-side only)
   const icpay = new Icpay({
     secretKey: 'sk_live_your_secret_key_here',
-    accountId: 'your-account-id',
     environment: 'production', // or 'development'
     apiUrl: 'https://api.icpay.com', // optional, defaults to production URL
     icHost: 'https://ic0.app' // IC network host
@@ -26,9 +25,7 @@ async function privateExample() {
         name: businessAccount.name,
         email: businessAccount.email, // Available in private mode
         isActive: businessAccount.isActive,
-        walletAddress: businessAccount.walletAddress,
-        walletBalance: businessAccount.walletBalance, // Available in private mode
-        walletCurrency: businessAccount.walletCurrency
+        walletAddress: businessAccount.walletAddress
       });
     } else {
       console.log('Business Account (Public):', {
@@ -36,8 +33,7 @@ async function privateExample() {
         accountCanisterId: businessAccount.accountCanisterId,
         name: businessAccount.name,
         isActive: businessAccount.isActive,
-        walletAddress: businessAccount.walletAddress,
-        walletCurrency: businessAccount.walletCurrency
+        walletAddress: businessAccount.walletAddress
       });
     }
 
@@ -51,7 +47,6 @@ async function privateExample() {
       decimals: ledger.decimals,
       verified: ledger.verified,
       currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod,
       lastPriceUpdate: ledger.lastPriceUpdate
     })));
 
@@ -62,8 +57,7 @@ async function privateExample() {
       name: ledger.name,
       symbol: ledger.symbol,
       canisterId: ledger.canisterId,
-      currentPrice: ledger.currentPrice,
-      priceFetchMethod: ledger.priceFetchMethod
+      currentPrice: ledger.currentPrice
     })));
 
     // 4. Connect to a wallet (required for balance operations)
@@ -118,8 +112,7 @@ async function privateExample() {
       currentPrice: priceCalculation.currentPrice,
       tokenAmountHuman: priceCalculation.tokenAmountHuman,
       tokenAmountDecimals: priceCalculation.tokenAmountDecimals,
-      priceTimestamp: priceCalculation.priceTimestamp,
-      priceFetchMethod: priceCalculation.priceFetchMethod
+      priceTimestamp: priceCalculation.priceTimestamp
     });
 
     // 8. Get transaction history (private method)
@@ -166,7 +159,6 @@ async function privateExample() {
       decimals: ledgerInfo.decimals,
       verified: ledgerInfo.verified,
       currentPrice: ledgerInfo.currentPrice,
-      priceFetchMethod: ledgerInfo.priceFetchMethod,
       lastPriceUpdate: ledgerInfo.lastPriceUpdate
     });
 
