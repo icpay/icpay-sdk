@@ -353,17 +353,31 @@ export class Icpay {
     return new Uint8Array(bytes);
   }
 
+  private createPackedMemo(accountCanisterId: number, intentCode: number): Uint8Array {
+    let memo = (BigInt(accountCanisterId >>> 0) << BigInt(32)) | BigInt(intentCode >>> 0);
+    if (memo === BigInt(0)) return new Uint8Array([0]);
+    const out: number[] = [];
+    while (memo > BigInt(0)) {
+      out.push(Number(memo & BigInt(0xff)));
+      memo >>= BigInt(8);
+    }
+    return new Uint8Array(out);
+  }
+
   /**
    * Send funds to a specific canister/ledger (public method)
    * This is now a real transaction
    */
   async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
     try {
+      console.log('[ICPay SDK] sendFunds start', { request });
       // Fetch account info to get accountCanisterId if not provided
       let accountCanisterId = request.accountCanisterId;
       if (!accountCanisterId) {
+        console.log('[ICPay SDK] fetching account info for accountCanisterId');
         const accountInfo = await this.getAccountInfo();
         accountCanisterId = accountInfo.accountCanisterId.toString();
+        console.log('[ICPay SDK] accountCanisterId resolved', { accountCanisterId });
       }
 
       // Always use icpayCanisterId as toPrincipal
@@ -375,12 +389,13 @@ export class Icpay {
       let toPrincipal = this.icpayCanisterId!;
       const amount = typeof request.amount === 'string' ? BigInt(request.amount) : BigInt(request.amount);
       const host = this.icHost;
-      let memo: Uint8Array | undefined = this.createMemoWithAccountCanisterId(parseInt(accountCanisterId));
+      let memo: Uint8Array | undefined = undefined;
 
 
 
       // Check balance before sending
       const requiredAmount = amount;
+      console.log('[ICPay SDK] checking balance', { ledgerCanisterId, requiredAmount: requiredAmount.toString() });
 
       // Helper function to make amounts human-readable
       const formatAmount = (amount: bigint, decimals: number = 8, symbol: string = '') => {
@@ -405,6 +420,7 @@ export class Icpay {
               details: { required: requiredAmount, available: actualBalance }
             });
           }
+          console.log('[ICPay SDK] balance ok', { actualBalance: actualBalance.toString() });
         } catch (balanceError) {
           // If we can't fetch the specific ledger balance, fall back to the old logic
           throw new IcpayError({
@@ -414,9 +430,40 @@ export class Icpay {
           });
         }
 
+      // 1) Create payment intent via API
+      let paymentIntentId: string | null = null;
+      let paymentIntentCode: number | null = null;
+      try {
+        console.log('[ICPay SDK] creating payment intent');
+        const intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
+          amount: request.amount,
+          ledgerCanisterId,
+          metadata: request.metadata || {},
+        });
+        paymentIntentId = intentResp.data?.paymentIntent?.id || null;
+        paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
+        console.log('[ICPay SDK] payment intent created', { paymentIntentId, paymentIntentCode });
+      } catch (e) {
+        // proceed without intent if API not available
+        console.log('[ICPay SDK] payment intent create failed (continuing)', e);
+      }
+
+      // Build packed memo if possible
+      try {
+        const acctIdNum = parseInt(accountCanisterId);
+        if (!isNaN(acctIdNum) && paymentIntentCode != null) {
+          memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
+          console.log('[ICPay SDK] built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
+        } else if (!isNaN(acctIdNum)) {
+          memo = this.createMemoWithAccountCanisterId(acctIdNum);
+          console.log('[ICPay SDK] built legacy memo', { accountCanisterId: acctIdNum });
+        }
+      } catch {}
+
       let transferResult;
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
+        console.log('[ICPay SDK] sending ICRC-1 transfer (ICP)');
         transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
           toPrincipal,
@@ -426,6 +473,7 @@ export class Icpay {
         );
       } else {
         // ICRC-1 ledgers: use principal directly
+        console.log('[ICPay SDK] sending ICRC-1 transfer');
         transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
           toPrincipal,
@@ -437,28 +485,35 @@ export class Icpay {
 
       // Assume transferResult returns a block index or transaction id
       const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
+      console.log('[ICPay SDK] transfer result', { blockIndex });
 
       // First, notify the canister about the ledger transaction
       let canisterTransactionId: number;
       try {
+        console.log('[ICPay SDK] notifying canister about ledger tx');
         const transactionIdString = await this.notifyLedgerTransaction(
           this.icpayCanisterId!,
           ledgerCanisterId,
           BigInt(blockIndex)
         );
         canisterTransactionId = parseInt(transactionIdString, 10);
+        console.log('[ICPay SDK] canister notified', { canisterTransactionId });
       } catch (notifyError) {
         canisterTransactionId = parseInt(blockIndex, 10);
+        console.log('[ICPay SDK] notify failed, using blockIndex as tx id', { canisterTransactionId });
       }
 
       // Poll for transaction status until completed
       // Use the transaction ID returned by the notification, not the block index
       let status: any = null;
       try {
+        console.log('[ICPay SDK] polling transaction status', { canisterTransactionId });
         status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
+        console.log('[ICPay SDK] poll done', { status });
       } catch (e) {
         // If polling fails, still return the transactionId and pending status
         status = { status: 'pending' };
+        console.log('[ICPay SDK] poll failed, falling back to pending');
       }
 
       // Extract the status string from the transaction object
@@ -483,6 +538,31 @@ export class Icpay {
         }
       }
 
+      // 5) Notify API about completion with intent and transaction id
+      try {
+        const isPrivate = !!this.privateApiClient;
+        const notifyClient = isPrivate ? this.privateApiClient! : this.publicApiClient;
+        const notifyPath = isPrivate ? '/sdk/payments/notify' : '/sdk/public/payments/notify';
+        console.log('[ICPay SDK] notifying API about completion', { notifyPath, paymentIntentId, canisterTransactionId });
+        await notifyClient.post(notifyPath, {
+          paymentIntentId,
+          canisterTxId: canisterTransactionId,
+        });
+      } catch (e) { console.log('[ICPay SDK] API notify failed (non-fatal)', e); }
+
+      let paymentData: any = undefined;
+      try {
+        const isPrivate = !!this.privateApiClient;
+        const notifyClient = isPrivate ? this.privateApiClient! : this.publicApiClient;
+        const notifyPath = isPrivate ? '/sdk/payments/notify' : '/sdk/public/payments/notify';
+        console.log('[ICPay SDK] fetching payment object', { notifyPath, paymentIntentId, canisterTransactionId });
+        const resp = await notifyClient.post(notifyPath, {
+          paymentIntentId,
+          canisterTxId: canisterTransactionId,
+        });
+        paymentData = resp.data;
+      } catch (e) { console.log('[ICPay SDK] fetch payment object failed (non-fatal)', e); }
+
       const response = {
         transactionId: canisterTransactionId,
         status: statusString,
@@ -490,9 +570,11 @@ export class Icpay {
         recipientCanister: ledgerCanisterId,
         timestamp: new Date(),
         description: 'Fund transfer',
-        metadata: request.metadata
+        metadata: request.metadata,
+        payment: paymentData
       };
 
+      console.log('[ICPay SDK] sendFunds done', response);
       return response;
     } catch (error) {
       // eslint-disable-next-line no-console

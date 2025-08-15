@@ -101,6 +101,7 @@ export interface TransactionResponse {
   timestamp: Date;
   description?: string;
   metadata?: Record<string, any>;
+  payment?: PaymentObject;
 }
 
 export interface TransactionStatus {
@@ -239,4 +240,21 @@ export interface SendFundsUsdRequest {
   ledgerCanisterId: string;
   accountCanisterId?: string; // Optional, will be fetched if not provided
   metadata?: Record<string, any>;
+}
+
+// Payments types
+export interface PaymentIntent {
+  id: string;
+  amount: string;
+  ledgerCanisterId: string;
+  status: 'requires_payment' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface PaymentObject {
+  payment: any;
+  intent: any;
+  invoice?: any;
+  transaction?: any;
 }
