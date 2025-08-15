@@ -538,30 +538,18 @@ export class Icpay {
         }
       }
 
-      // 5) Notify API about completion with intent and transaction id
+      // 5) Notify API about completion with intent and transaction id (always public endpoint)
+      let publicNotify: any = undefined;
       try {
-        const isPrivate = !!this.privateApiClient;
-        const notifyClient = isPrivate ? this.privateApiClient! : this.publicApiClient;
-        const notifyPath = isPrivate ? '/sdk/payments/notify' : '/sdk/public/payments/notify';
+        const notifyClient = this.publicApiClient;
+        const notifyPath = '/sdk/public/payments/notify';
         console.log('[ICPay SDK] notifying API about completion', { notifyPath, paymentIntentId, canisterTransactionId });
-        await notifyClient.post(notifyPath, {
-          paymentIntentId,
-          canisterTxId: canisterTransactionId,
-        });
-      } catch (e) { console.log('[ICPay SDK] API notify failed (non-fatal)', e); }
-
-      let paymentData: any = undefined;
-      try {
-        const isPrivate = !!this.privateApiClient;
-        const notifyClient = isPrivate ? this.privateApiClient! : this.publicApiClient;
-        const notifyPath = isPrivate ? '/sdk/payments/notify' : '/sdk/public/payments/notify';
-        console.log('[ICPay SDK] fetching payment object', { notifyPath, paymentIntentId, canisterTransactionId });
         const resp = await notifyClient.post(notifyPath, {
           paymentIntentId,
           canisterTxId: canisterTransactionId,
         });
-        paymentData = resp.data;
-      } catch (e) { console.log('[ICPay SDK] fetch payment object failed (non-fatal)', e); }
+        publicNotify = resp.data;
+      } catch (e) { console.log('[ICPay SDK] API notify failed (non-fatal)', e); }
 
       const response = {
         transactionId: canisterTransactionId,
@@ -571,7 +559,7 @@ export class Icpay {
         timestamp: new Date(),
         description: 'Fund transfer',
         metadata: request.metadata,
-        payment: paymentData
+        payment: publicNotify
       };
 
       console.log('[ICPay SDK] sendFunds done', response);
