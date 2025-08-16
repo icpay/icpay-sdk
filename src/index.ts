@@ -549,17 +549,39 @@ export class Icpay {
       }
 
       // 5) Notify API about completion with intent and transaction id (always public endpoint)
+      // Retry up to 5 times with small delay, also try triggering a sync in-between
       let publicNotify: any = undefined;
-      try {
+      {
         const notifyClient = this.publicApiClient;
         const notifyPath = '/sdk/public/payments/notify';
-        console.log('[ICPay SDK] notifying API about completion', { notifyPath, paymentIntentId, canisterTransactionId });
-        const resp = await notifyClient.post(notifyPath, {
-          paymentIntentId,
-          canisterTxId: canisterTransactionId,
-        });
-        publicNotify = resp.data;
-      } catch (e) { console.log('[ICPay SDK] API notify failed (non-fatal)', e); }
+        const maxNotifyAttempts = 5;
+        const notifyDelayMs = 1000;
+        for (let attempt = 1; attempt <= maxNotifyAttempts; attempt++) {
+          try {
+            console.log('[ICPay SDK] notifying API about completion', { attempt, notifyPath, paymentIntentId, canisterTransactionId });
+            const resp = await notifyClient.post(notifyPath, {
+              paymentIntentId,
+              canisterTxId: canisterTransactionId,
+            });
+            publicNotify = resp.data;
+            break;
+          } catch (e: any) {
+            const status = e?.response?.status;
+            const data = e?.response?.data;
+            console.log('[ICPay SDK] API notify attempt failed', { attempt, status, data });
+            // Proactively trigger a transaction sync if we get not found
+            try {
+              await this.triggerTransactionSync(canisterTransactionId);
+            } catch {}
+            if (attempt < maxNotifyAttempts) {
+              await new Promise(r => setTimeout(r, notifyDelayMs));
+            }
+          }
+        }
+        if (!publicNotify) {
+          console.log('[ICPay SDK] API notify failed after retries (non-fatal)');
+        }
+      }
 
       const response = {
         transactionId: canisterTransactionId,
