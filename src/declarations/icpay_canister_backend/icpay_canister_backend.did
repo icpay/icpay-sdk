@@ -78,12 +78,12 @@ type Transaction = record {
   recipient : LedgerAccount;
   index_to_account : opt nat64;
   timestamp_to_account : opt nat64;
-  receiver_amount : nat;
   notify_processing : bool;
   timestamp : nat64;
   index_received : opt nat64;
   sender_principal_id : text;
   timestamp_to_platform : opt nat64;
+  account_amount : nat;
   ledger_canister_id : text;
   timestamp_received : opt nat64;
   amount : nat;
