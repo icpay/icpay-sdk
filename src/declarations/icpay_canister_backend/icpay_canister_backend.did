@@ -55,7 +55,6 @@ type Icrc21Error = variant {
 };
 type Icrc21ErrorInfo = record { description : text };
 type Icrc21Page = record { lines : vec text };
-type LedgerAccount = record { owner : principal; subaccount : opt blob };
 type LedgerTransactionNotification = record {
   block_index : nat64;
   ledger_canister_id : text;
@@ -75,7 +74,6 @@ type Transaction = record {
   account_canister_id : nat64;
   platform_fee_amount : nat;
   transfer_fee : nat;
-  recipient : LedgerAccount;
   index_to_account : opt nat64;
   timestamp_to_account : opt nat64;
   notify_processing : bool;

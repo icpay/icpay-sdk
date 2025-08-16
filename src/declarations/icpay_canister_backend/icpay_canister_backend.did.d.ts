@@ -63,10 +63,6 @@ export type Icrc21Error = {
   { 'ConsentMessageUnavailable' : Icrc21ErrorInfo };
 export interface Icrc21ErrorInfo { 'description' : string }
 export interface Icrc21Page { 'lines' : Array<string> }
-export interface LedgerAccount {
-  'owner' : Principal,
-  'subaccount' : [] | [Uint8Array | number[]],
-}
 export interface LedgerTransactionNotification {
   'block_index' : bigint,
   'ledger_canister_id' : string,
@@ -92,7 +88,6 @@ export interface Transaction {
   'account_canister_id' : bigint,
   'platform_fee_amount' : bigint,
   'transfer_fee' : bigint,
-  'recipient' : LedgerAccount,
   'index_to_account' : [] | [bigint],
   'timestamp_to_account' : [] | [bigint],
   'notify_processing' : boolean,

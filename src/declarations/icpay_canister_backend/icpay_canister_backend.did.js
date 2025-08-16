@@ -15,17 +15,12 @@ export const idlFactory = ({ IDL }) => {
     'Completed' : IDL.Null,
     'Pending' : IDL.Null,
   });
-  const LedgerAccount = IDL.Record({
-    'owner' : IDL.Principal,
-    'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
-  });
   const Transaction = IDL.Record({
     'id' : IDL.Nat,
     'status' : TransactionStatus,
     'account_canister_id' : IDL.Nat64,
     'platform_fee_amount' : IDL.Nat,
     'transfer_fee' : IDL.Nat,
-    'recipient' : LedgerAccount,
     'index_to_account' : IDL.Opt(IDL.Nat64),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'notify_processing' : IDL.Bool,
