@@ -60,8 +60,15 @@ type LedgerTransactionNotification = record {
   block_index : nat64;
   ledger_canister_id : text;
 };
+type NotifyResult = record {
+  id : text;
+  status : TransactionStatus;
+  amount : nat;
+};
+type PublicTxStatus = record { status : TransactionStatus; amount : nat };
 type Result = variant { Ok; Err : text };
-type Result_1 = variant { Ok : text; Err : text };
+type Result_1 = variant { Ok : NotifyResult; Err : text };
+type Result_2 = variant { Ok : text; Err : text };
 type Transaction = record {
   id : nat;
   status : TransactionStatus;
@@ -123,6 +130,9 @@ service : () -> {
     ) query;
   get_platform_wallet : () -> (text) query;
   get_transaction : (nat) -> (opt Transaction) query;
+  get_transaction_status_public : (nat64, nat, opt nat64) -> (
+      opt PublicTxStatus,
+    ) query;
   get_transactions : (TransactionFilter) -> (TransactionResult) query;
   icrc21_canister_call_consent_message : (Icrc21ConsentMessageRequest) -> (
       Icrc21ConsentMessageResponse,
@@ -135,5 +145,5 @@ service : () -> {
   set_platform_wallet : (text) -> (Result);
   update_account : (nat64, Account) -> (Result);
   update_controllers : () -> (Result);
-  withdraw_funds : (WithdrawRequest) -> (Result_1);
+  withdraw_funds : (WithdrawRequest) -> (Result_2);
 }

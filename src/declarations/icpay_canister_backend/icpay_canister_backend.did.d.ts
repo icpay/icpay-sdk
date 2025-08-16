@@ -71,9 +71,20 @@ export interface LedgerTransactionNotification {
   'block_index' : bigint,
   'ledger_canister_id' : string,
 }
+export interface NotifyResult {
+  'id' : string,
+  'status' : TransactionStatus,
+  'amount' : bigint,
+}
+export interface PublicTxStatus {
+  'status' : TransactionStatus,
+  'amount' : bigint,
+}
 export type Result = { 'Ok' : null } |
   { 'Err' : string };
-export type Result_1 = { 'Ok' : string } |
+export type Result_1 = { 'Ok' : NotifyResult } |
+  { 'Err' : string };
+export type Result_2 = { 'Ok' : string } |
   { 'Err' : string };
 export interface Transaction {
   'id' : bigint,
@@ -136,6 +147,10 @@ export interface _SERVICE {
   >,
   'get_platform_wallet' : ActorMethod<[], string>,
   'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
+  'get_transaction_status_public' : ActorMethod<
+    [bigint, bigint, [] | [bigint]],
+    [] | [PublicTxStatus]
+  >,
   'get_transactions' : ActorMethod<[TransactionFilter], TransactionResult>,
   'icrc21_canister_call_consent_message' : ActorMethod<
     [Icrc21ConsentMessageRequest],
@@ -152,7 +167,7 @@ export interface _SERVICE {
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
-  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_1>,
+  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_2>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

@@ -489,14 +489,21 @@ export class Icpay {
 
       // First, notify the canister about the ledger transaction
       let canisterTransactionId: number;
+      let notifyStatus: any = null;
       try {
         console.log('[ICPay SDK] notifying canister about ledger tx');
-        const transactionIdString = await this.notifyLedgerTransaction(
+        const notifyRes: any = await this.notifyLedgerTransaction(
           this.icpayCanisterId!,
           ledgerCanisterId,
           BigInt(blockIndex)
         );
-        canisterTransactionId = parseInt(transactionIdString, 10);
+        // notify returns { id, status, amount }
+        if (typeof notifyRes === 'string') {
+          canisterTransactionId = parseInt(notifyRes, 10);
+        } else {
+          canisterTransactionId = parseInt(notifyRes.id, 10);
+          notifyStatus = notifyRes;
+        }
         console.log('[ICPay SDK] canister notified', { canisterTransactionId });
       } catch (notifyError) {
         canisterTransactionId = parseInt(blockIndex, 10);
@@ -506,14 +513,17 @@ export class Icpay {
       // Poll for transaction status until completed
       // Use the transaction ID returned by the notification, not the block index
       let status: any = null;
-      try {
-        console.log('[ICPay SDK] polling transaction status', { canisterTransactionId });
-        status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, 2000, 30);
-        console.log('[ICPay SDK] poll done', { status });
-      } catch (e) {
-        // If polling fails, still return the transactionId and pending status
-        status = { status: 'pending' };
-        console.log('[ICPay SDK] poll failed, falling back to pending');
+      if (notifyStatus && notifyStatus.status) {
+        status = { status: notifyStatus.status };
+      } else {
+        try {
+          console.log('[ICPay SDK] polling transaction status (public)', { canisterTransactionId });
+          status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, accountCanisterId as string, Number(blockIndex), 2000, 30);
+          console.log('[ICPay SDK] poll done', { status });
+        } catch (e) {
+          status = { status: 'pending' };
+          console.log('[ICPay SDK] poll failed, falling back to pending');
+        }
       }
 
       // Extract the status string from the transaction object
@@ -604,10 +614,11 @@ export class Icpay {
   /**
    * Poll for transaction status using anonymous actor (no signature required)
    */
-  async pollTransactionStatus(canisterId: string, transactionId: number, intervalMs = 2000, maxAttempts = 30): Promise<any> {
+  async pollTransactionStatus(canisterId: string, transactionId: number, accountCanisterId: string, indexReceived: number, intervalMs = 2000, maxAttempts = 30): Promise<any> {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        let status = await this.getTransactionStatusFromCanister(canisterId, transactionId);
+        // Use public-only method
+        let status = await this.getTransactionStatusPublic(canisterId, transactionId, indexReceived, accountCanisterId);
 
         // If we get an array (unexpected), try the alternative method
         if (Array.isArray(status) && status.length > 0) {
@@ -627,16 +638,7 @@ export class Icpay {
         }
 
         // If we get null or no valid result, try the alternative method
-        if (!status || (Array.isArray(status) && status.length === 0)) {
-          status = await this.getTransactionByFilter(transactionId);
-
-          if (status && status.status) {
-            if (this.isTransactionCompleted(status.status)) {
-              return status; // Return immediately when completed
-            }
-            // If not completed, continue polling
-          }
-        }
+        // No secondary fallback to controller-only methods
 
         if (status && status.status) {
           if (this.isTransactionCompleted(status.status)) {
@@ -726,6 +728,18 @@ export class Icpay {
     } else {
       throw new Error('Unexpected canister notify result');
     }
+  }
+
+  async getTransactionStatusPublic(canisterId: string, canisterTransactionId: number, indexReceived: number, accountCanisterId: string): Promise<any> {
+    const agent = new HttpAgent({ host: this.icHost });
+    const actor = Actor.createActor(icpayIdl, { agent, canisterId });
+    const acctIdNum = parseInt(accountCanisterId);
+    const res = await (actor as any).get_transaction_status_public(
+      acctIdNum,
+      BigInt(canisterTransactionId),
+      [indexReceived]
+    );
+    return res || { status: 'pending' };
   }
 
   /**
