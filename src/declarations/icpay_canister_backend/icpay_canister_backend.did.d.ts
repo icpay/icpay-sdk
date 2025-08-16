@@ -80,7 +80,9 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : NotifyResult } |
   { 'Err' : string };
-export type Result_2 = { 'Ok' : string } |
+export type Result_2 = { 'Ok' : bigint } |
+  { 'Err' : string };
+export type Result_3 = { 'Ok' : string } |
   { 'Err' : string };
 export interface Transaction {
   'id' : bigint,
@@ -162,7 +164,8 @@ export interface _SERVICE {
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
-  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_2>,
+  'withdraw_from_subaccount' : ActorMethod<[bigint, string, bigint], Result_2>,
+  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_3>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];
