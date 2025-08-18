@@ -205,6 +205,7 @@ export const idlFactory = ({ IDL }) => {
     'remove_account' : IDL.Func([IDL.Nat64], [Result], []),
     'request_payout' : IDL.Func([IDL.Nat64, IDL.Text, IDL.Nat], [Result_2], []),
     'request_refund' : IDL.Func([IDL.Nat], [Result_3], []),
+    'retry_payout' : IDL.Func([IDL.Nat], [Result_2], []),
     'set_controller' : IDL.Func([IDL.Principal], [Result], []),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
