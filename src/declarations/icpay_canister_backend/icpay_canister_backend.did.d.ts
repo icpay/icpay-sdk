@@ -112,12 +112,10 @@ export interface Transaction {
   'timestamp' : bigint,
   'index_received' : [] | [bigint],
   'sender_principal_id' : string,
-  'timestamp_to_platform' : [] | [bigint],
   'account_amount' : bigint,
   'ledger_canister_id' : string,
   'timestamp_received' : [] | [bigint],
   'amount' : bigint,
-  'index_to_platform' : [] | [bigint],
 }
 export interface TransactionFilter {
   'from_timestamp' : [] | [bigint],

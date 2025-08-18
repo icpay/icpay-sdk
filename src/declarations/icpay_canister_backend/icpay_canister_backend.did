@@ -96,12 +96,10 @@ type Transaction = record {
   timestamp : nat64;
   index_received : opt nat64;
   sender_principal_id : text;
-  timestamp_to_platform : opt nat64;
   account_amount : nat;
   ledger_canister_id : text;
   timestamp_received : opt nat64;
   amount : nat;
-  index_to_platform : opt nat64;
 };
 type TransactionFilter = record {
   from_timestamp : opt nat64;

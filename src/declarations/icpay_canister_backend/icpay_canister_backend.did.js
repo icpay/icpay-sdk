@@ -27,12 +27,10 @@ export const idlFactory = ({ IDL }) => {
     'timestamp' : IDL.Nat64,
     'index_received' : IDL.Opt(IDL.Nat64),
     'sender_principal_id' : IDL.Text,
-    'timestamp_to_platform' : IDL.Opt(IDL.Nat64),
     'account_amount' : IDL.Nat,
     'ledger_canister_id' : IDL.Text,
     'timestamp_received' : IDL.Opt(IDL.Nat64),
     'amount' : IDL.Nat,
-    'index_to_platform' : IDL.Opt(IDL.Nat64),
   });
   const TransactionResult = IDL.Record({
     'transactions' : IDL.Vec(Transaction),
