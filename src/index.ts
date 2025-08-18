@@ -194,6 +194,30 @@ export class Icpay {
   }
 
   /**
+   * Get a verified ledger's canister ID by its symbol (public helper)
+   */
+  async getLedgerCanisterIdBySymbol(symbol: string): Promise<string> {
+    if (!symbol || typeof symbol !== 'string') {
+      throw new IcpayError({
+        code: 'INVALID_LEDGER_SYMBOL',
+        message: 'Symbol must be a non-empty string'
+      });
+    }
+
+    const ledgers = await this.getVerifiedLedgers();
+    const match = ledgers.find(l => l.symbol.toLowerCase() === symbol.toLowerCase());
+
+    if (!match) {
+      throw new IcpayError({
+        code: 'LEDGER_SYMBOL_NOT_FOUND',
+        message: `Verified ledger with symbol ${symbol} not found`
+      });
+    }
+
+    return match.canisterId;
+  }
+
+  /**
    * Get transaction status by canister transaction ID (private method)
    *
    * This method returns transaction status from the ICPay API database.

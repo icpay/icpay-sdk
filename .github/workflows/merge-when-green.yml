@@ -1,0 +1,85 @@
+name: Merge PR when checks pass
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: ["ci", "build", "test"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  merge-when-green:
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'pull_request')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Identify PR
+        id: find_pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const core = require('@actions/core');
+            const ctx = context;
+            let pr = ctx.payload.pull_request;
+            if (!pr && ctx.payload.workflow_run) {
+              const prs = ctx.payload.workflow_run.pull_requests;
+              if (prs && prs.length > 0) {
+                pr = prs[0];
+              }
+            }
+            if (!pr) {
+              core.info('No PR to consider.');
+              core.setOutput('pr_number', '');
+              return;
+            }
+            core.setOutput('pr_number', pr.number.toString());
+
+      - name: Attempt merge if green
+        if: steps.find_pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt(core.getInput('pr_number')) || parseInt('${{ steps.find_pr.outputs.pr_number }}');
+            const { data: pr } = await github.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            if (pr.draft) {
+              core.info(`PR #${prNumber} is draft. Skipping.`);
+              return;
+            }
+            if (pr.state !== 'open') {
+              core.info(`PR #${prNumber} is not open. Skipping.`);
+              return;
+            }
+            if (!['master','main'].includes(pr.base.ref)) {
+              core.info(`PR #${prNumber} base is ${pr.base.ref}, not master/main. Skipping.`);
+              return;
+            }
+            const { data: prDetails } = await github.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            if (prDetails.mergeable_state !== 'clean' && prDetails.mergeable_state !== 'has_hooks') {
+              core.info(`PR #${prNumber} mergeable_state=${prDetails.mergeable_state}. Not clean yet.`);
+              return;
+            }
+            try {
+              await github.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                merge_method: 'merge',
+              });
+              core.info(`Merged PR #${prNumber}.`);
+            } catch (e) {
+              core.info(`Merge attempt failed (likely required checks/approvals unmet): ${e.message}`);
+            }
+
