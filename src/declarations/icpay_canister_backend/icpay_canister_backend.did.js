@@ -50,6 +50,20 @@ export const idlFactory = ({ IDL }) => {
     'total_transactions' : IDL.Nat32,
     'platform_wallet' : IDL.Text,
   });
+  const Refund = IDL.Record({
+    'status' : TransactionStatus,
+    'timestamp_platform_to_account' : IDL.Opt(IDL.Nat64),
+    'account_canister_id' : IDL.Nat64,
+    'original_tx_id' : IDL.Nat,
+    'notify_processing' : IDL.Bool,
+    'timestamp_created' : IDL.Nat64,
+    'timestamp_to_sender' : IDL.Opt(IDL.Nat64),
+    'ledger_canister_id' : IDL.Text,
+    'amount' : IDL.Nat,
+    'platform_refund_amount' : IDL.Nat,
+    'index_to_sender' : IDL.Opt(IDL.Nat64),
+    'index_platform_to_account' : IDL.Opt(IDL.Nat64),
+  });
   const PublicTxStatus = IDL.Record({
     'status' : TransactionStatus,
     'amount' : IDL.Nat,
@@ -121,13 +135,14 @@ export const idlFactory = ({ IDL }) => {
     'amount' : IDL.Nat,
   });
   const Result_1 = IDL.Variant({ 'Ok' : NotifyResult, 'Err' : IDL.Text });
-  const Result_2 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
+  const Result_2 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
+  const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
   const WithdrawRequest = IDL.Record({
     'recipient' : IDL.Text,
     'ledger_canister_id' : IDL.Text,
     'amount' : IDL.Nat,
   });
-  const Result_3 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const Result_4 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
   return IDL.Service({
     'add_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'get_account' : IDL.Func([IDL.Nat64], [IDL.Opt(Account)], ['query']),
@@ -145,6 +160,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'get_platform_wallet' : IDL.Func([], [IDL.Text], ['query']),
+    'get_refund_by_original_tx_id' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Opt(Refund)],
+        ['query'],
+      ),
     'get_transaction' : IDL.Func([IDL.Nat], [IDL.Opt(Transaction)], ['query']),
     'get_transaction_status_public' : IDL.Func(
         [IDL.Nat64, IDL.Nat, IDL.Opt(IDL.Nat64)],
@@ -169,16 +189,17 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'remove_account' : IDL.Func([IDL.Nat64], [Result], []),
+    'request_refund' : IDL.Func([IDL.Nat], [Result_2], []),
     'set_controller' : IDL.Func([IDL.Principal], [Result], []),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'update_controllers' : IDL.Func([], [Result], []),
     'withdraw_from_subaccount' : IDL.Func(
         [IDL.Nat64, IDL.Text, IDL.Nat],
-        [Result_2],
+        [Result_3],
         [],
       ),
-    'withdraw_funds' : IDL.Func([WithdrawRequest], [Result_3], []),
+    'withdraw_funds' : IDL.Func([WithdrawRequest], [Result_4], []),
   });
 };
 export const init = ({ IDL }) => { return []; };

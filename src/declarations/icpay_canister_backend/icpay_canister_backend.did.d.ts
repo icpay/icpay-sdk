@@ -76,13 +76,29 @@ export interface PublicTxStatus {
   'status' : TransactionStatus,
   'amount' : bigint,
 }
+export interface Refund {
+  'status' : TransactionStatus,
+  'timestamp_platform_to_account' : [] | [bigint],
+  'account_canister_id' : bigint,
+  'original_tx_id' : bigint,
+  'notify_processing' : boolean,
+  'timestamp_created' : bigint,
+  'timestamp_to_sender' : [] | [bigint],
+  'ledger_canister_id' : string,
+  'amount' : bigint,
+  'platform_refund_amount' : bigint,
+  'index_to_sender' : [] | [bigint],
+  'index_platform_to_account' : [] | [bigint],
+}
 export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : NotifyResult } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_3 = { 'Ok' : string } |
+export type Result_3 = { 'Ok' : bigint } |
+  { 'Err' : string };
+export type Result_4 = { 'Ok' : string } |
   { 'Err' : string };
 export interface Transaction {
   'id' : bigint,
@@ -143,6 +159,7 @@ export interface _SERVICE {
     TransactionResult
   >,
   'get_platform_wallet' : ActorMethod<[], string>,
+  'get_refund_by_original_tx_id' : ActorMethod<[bigint], [] | [Refund]>,
   'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
   'get_transaction_status_public' : ActorMethod<
     [bigint, bigint, [] | [bigint]],
@@ -160,12 +177,13 @@ export interface _SERVICE {
     Result_1
   >,
   'remove_account' : ActorMethod<[bigint], Result>,
+  'request_refund' : ActorMethod<[bigint], Result_2>,
   'set_controller' : ActorMethod<[Principal], Result>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
-  'withdraw_from_subaccount' : ActorMethod<[bigint, string, bigint], Result_2>,
-  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_3>,
+  'withdraw_from_subaccount' : ActorMethod<[bigint, string, bigint], Result_3>,
+  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_4>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

@@ -65,10 +65,25 @@ type NotifyResult = record {
   amount : nat;
 };
 type PublicTxStatus = record { status : TransactionStatus; amount : nat };
+type Refund = record {
+  status : TransactionStatus;
+  timestamp_platform_to_account : opt nat64;
+  account_canister_id : nat64;
+  original_tx_id : nat;
+  notify_processing : bool;
+  timestamp_created : nat64;
+  timestamp_to_sender : opt nat64;
+  ledger_canister_id : text;
+  amount : nat;
+  platform_refund_amount : nat;
+  index_to_sender : opt nat64;
+  index_platform_to_account : opt nat64;
+};
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NotifyResult; Err : text };
-type Result_2 = variant { Ok : nat64; Err : text };
-type Result_3 = variant { Ok : text; Err : text };
+type Result_2 = variant { Ok : nat; Err : text };
+type Result_3 = variant { Ok : nat64; Err : text };
+type Result_4 = variant { Ok : text; Err : text };
 type Transaction = record {
   id : nat;
   status : TransactionStatus;
@@ -128,6 +143,7 @@ service : () -> {
       TransactionResult,
     ) query;
   get_platform_wallet : () -> (text) query;
+  get_refund_by_original_tx_id : (nat) -> (opt Refund) query;
   get_transaction : (nat) -> (opt Transaction) query;
   get_transaction_status_public : (nat64, nat, opt nat64) -> (
       opt PublicTxStatus,
@@ -140,10 +156,11 @@ service : () -> {
   list_accounts : () -> (vec AccountRecord) query;
   notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
   remove_account : (nat64) -> (Result);
+  request_refund : (nat) -> (Result_2);
   set_controller : (principal) -> (Result);
   set_platform_wallet : (text) -> (Result);
   update_account : (nat64, Account) -> (Result);
   update_controllers : () -> (Result);
-  withdraw_from_subaccount : (nat64, text, nat) -> (Result_2);
-  withdraw_funds : (WithdrawRequest) -> (Result_3);
+  withdraw_from_subaccount : (nat64, text, nat) -> (Result_3);
+  withdraw_funds : (WithdrawRequest) -> (Result_4);
 }
