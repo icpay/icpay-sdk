@@ -172,6 +172,7 @@ service : () -> {
   remove_account : (nat64) -> (Result);
   request_payout : (nat64, text, nat) -> (Result_2);
   request_refund : (nat) -> (Result_3);
+  retry_payout : (nat) -> (Result_2);
   set_controller : (principal) -> (Result);
   set_platform_wallet : (text) -> (Result);
   update_account : (nat64, Account) -> (Result);
