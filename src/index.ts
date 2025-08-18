@@ -714,23 +714,6 @@ export class Icpay {
   }
 
   /**
-   * Fetch transaction status from the canister using agent-js
-   */
-  async getTransactionStatusFromCanister(canisterId: string, transactionId: number): Promise<any> {
-    // Create anonymous actor for canister queries (no signature required)
-    const agent = new HttpAgent({ host: this.icHost });
-    const actor = Actor.createActor(icpayIdl, { agent, canisterId });
-
-    try {
-      const result = await actor.get_transaction(transactionId);
-      return result;
-    } catch (error) {
-      console.error('getTransactionStatusFromCanister error:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Notify canister about ledger transaction using anonymous actor (no signature required)
    */
   async notifyLedgerTransaction(canisterId: string, ledgerCanisterId: string, blockIndex: bigint): Promise<string> {
