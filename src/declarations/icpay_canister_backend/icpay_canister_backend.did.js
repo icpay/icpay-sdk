@@ -48,6 +48,21 @@ export const idlFactory = ({ IDL }) => {
     'total_transactions' : IDL.Nat32,
     'platform_wallet' : IDL.Text,
   });
+  const Payout = IDL.Record({
+    'id' : IDL.Nat,
+    'fee' : IDL.Nat,
+    'status' : TransactionStatus,
+    'account_canister_id' : IDL.Nat64,
+    'to_principal' : IDL.Text,
+    'to_subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'from_subaccount' : IDL.Vec(IDL.Nat8),
+    'timestamp_created' : IDL.Nat64,
+    'index' : IDL.Opt(IDL.Nat64),
+    'ledger_canister_id' : IDL.Text,
+    'timestamp_completed' : IDL.Opt(IDL.Nat64),
+    'amount' : IDL.Nat,
+    'status_message' : IDL.Opt(IDL.Text),
+  });
   const Refund = IDL.Record({
     'status' : TransactionStatus,
     'timestamp_platform_to_account' : IDL.Opt(IDL.Nat64),
@@ -133,8 +148,8 @@ export const idlFactory = ({ IDL }) => {
     'amount' : IDL.Nat,
   });
   const Result_1 = IDL.Variant({ 'Ok' : NotifyResult, 'Err' : IDL.Text });
-  const Result_2 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
-  const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
+  const Result_2 = IDL.Variant({ 'Ok' : Payout, 'Err' : IDL.Text });
+  const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
   const WithdrawRequest = IDL.Record({
     'recipient' : IDL.Text,
     'ledger_canister_id' : IDL.Text,
@@ -157,6 +172,7 @@ export const idlFactory = ({ IDL }) => {
         [TransactionResult],
         ['query'],
       ),
+    'get_payout' : IDL.Func([IDL.Nat], [IDL.Opt(Payout)], ['query']),
     'get_platform_wallet' : IDL.Func([], [IDL.Text], ['query']),
     'get_refund_by_original_tx_id' : IDL.Func(
         [IDL.Nat],
@@ -187,16 +203,12 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'remove_account' : IDL.Func([IDL.Nat64], [Result], []),
-    'request_refund' : IDL.Func([IDL.Nat], [Result_2], []),
+    'request_payout' : IDL.Func([IDL.Nat64, IDL.Text, IDL.Nat], [Result_2], []),
+    'request_refund' : IDL.Func([IDL.Nat], [Result_3], []),
     'set_controller' : IDL.Func([IDL.Principal], [Result], []),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'update_controllers' : IDL.Func([], [Result], []),
-    'withdraw_from_subaccount' : IDL.Func(
-        [IDL.Nat64, IDL.Text, IDL.Nat],
-        [Result_3],
-        [],
-      ),
     'withdraw_funds' : IDL.Func([WithdrawRequest], [Result_4], []),
   });
 };

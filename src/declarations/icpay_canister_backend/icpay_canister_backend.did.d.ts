@@ -72,6 +72,21 @@ export interface NotifyResult {
   'status' : TransactionStatus,
   'amount' : bigint,
 }
+export interface Payout {
+  'id' : bigint,
+  'fee' : bigint,
+  'status' : TransactionStatus,
+  'account_canister_id' : bigint,
+  'to_principal' : string,
+  'to_subaccount' : [] | [Uint8Array | number[]],
+  'from_subaccount' : Uint8Array | number[],
+  'timestamp_created' : bigint,
+  'index' : [] | [bigint],
+  'ledger_canister_id' : string,
+  'timestamp_completed' : [] | [bigint],
+  'amount' : bigint,
+  'status_message' : [] | [string],
+}
 export interface PublicTxStatus {
   'status' : TransactionStatus,
   'amount' : bigint,
@@ -94,7 +109,7 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : NotifyResult } |
   { 'Err' : string };
-export type Result_2 = { 'Ok' : bigint } |
+export type Result_2 = { 'Ok' : Payout } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
@@ -156,6 +171,7 @@ export interface _SERVICE {
     [string, [] | [number], [] | [number]],
     TransactionResult
   >,
+  'get_payout' : ActorMethod<[bigint], [] | [Payout]>,
   'get_platform_wallet' : ActorMethod<[], string>,
   'get_refund_by_original_tx_id' : ActorMethod<[bigint], [] | [Refund]>,
   'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
@@ -175,12 +191,12 @@ export interface _SERVICE {
     Result_1
   >,
   'remove_account' : ActorMethod<[bigint], Result>,
-  'request_refund' : ActorMethod<[bigint], Result_2>,
+  'request_payout' : ActorMethod<[bigint, string, bigint], Result_2>,
+  'request_refund' : ActorMethod<[bigint], Result_3>,
   'set_controller' : ActorMethod<[Principal], Result>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
-  'withdraw_from_subaccount' : ActorMethod<[bigint, string, bigint], Result_3>,
   'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_4>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
