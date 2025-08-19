@@ -37,11 +37,12 @@ export class Icpay {
   private actorProvider?: (canisterId: string, idl: any) => any;
   private icpayCanisterId: string | null = null;
   private accountInfoCache: any = null;
+  private verifiedLedgersCache: { data: VerifiedLedger[] | null; timestamp: number } = { data: null, timestamp: 0 };
 
   constructor(config: IcpayConfig) {
     this.config = {
       environment: 'production',
-      apiUrl: 'https://api.icpay.com',
+      apiUrl: 'https://api.icpay.org',
       ...config
     };
 
@@ -169,9 +170,17 @@ export class Icpay {
    * Get verified ledgers (public method)
    */
   async getVerifiedLedgers(): Promise<VerifiedLedger[]> {
+    const now = Date.now();
+    const cacheAge = 60 * 60 * 1000; // 60 minutes cache
+
+    // Return cached data if it's still fresh
+    if (this.verifiedLedgersCache.data && (now - this.verifiedLedgersCache.timestamp) < cacheAge) {
+      return this.verifiedLedgersCache.data;
+    }
+
     try {
       const response = await this.publicApiClient.get('/sdk/public/ledgers/verified');
-      return response.data.map((ledger: any) => ({
+      const ledgers = response.data.map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
@@ -184,6 +193,14 @@ export class Icpay {
         currentPrice: ledger.currentPrice || null,
         lastPriceUpdate: ledger.lastPriceUpdate || null
       }));
+
+      // Update cache
+      this.verifiedLedgersCache = {
+        data: ledgers,
+        timestamp: now
+      };
+
+      return ledgers;
     } catch (error) {
       throw new IcpayError({
         code: 'VERIFIED_LEDGERS_FETCH_FAILED',
