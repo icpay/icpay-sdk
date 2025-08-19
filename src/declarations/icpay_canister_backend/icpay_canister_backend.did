@@ -3,6 +3,7 @@ type Account = record {
   platform_fee_percentage : nat16;
   subaccount : opt blob;
   wallet_address : text;
+  icp_account_identifier : opt text;
   platform_fee_fixed : opt nat;
   is_active : bool;
 };
@@ -72,6 +73,7 @@ type Payout = record {
   to_principal : text;
   to_subaccount : opt blob;
   from_subaccount : blob;
+  icp_account_identifier : opt text;
   timestamp_created : nat64;
   index : opt nat64;
   ledger_canister_id : text;
