@@ -4,6 +4,7 @@ export const idlFactory = ({ IDL }) => {
     'platform_fee_percentage' : IDL.Nat16,
     'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'wallet_address' : IDL.Text,
+    'icp_account_identifier' : IDL.Opt(IDL.Text),
     'platform_fee_fixed' : IDL.Opt(IDL.Nat),
     'is_active' : IDL.Bool,
   });
@@ -56,6 +57,7 @@ export const idlFactory = ({ IDL }) => {
     'to_principal' : IDL.Text,
     'to_subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'from_subaccount' : IDL.Vec(IDL.Nat8),
+    'icp_account_identifier' : IDL.Opt(IDL.Text),
     'timestamp_created' : IDL.Nat64,
     'index' : IDL.Opt(IDL.Nat64),
     'ledger_canister_id' : IDL.Text,

@@ -7,6 +7,7 @@ export interface Account {
   'platform_fee_percentage' : number,
   'subaccount' : [] | [Uint8Array | number[]],
   'wallet_address' : string,
+  'icp_account_identifier' : [] | [string],
   'platform_fee_fixed' : [] | [bigint],
   'is_active' : boolean,
 }
@@ -80,6 +81,7 @@ export interface Payout {
   'to_principal' : string,
   'to_subaccount' : [] | [Uint8Array | number[]],
   'from_subaccount' : Uint8Array | number[],
+  'icp_account_identifier' : [] | [string],
   'timestamp_created' : bigint,
   'index' : [] | [bigint],
   'ledger_canister_id' : string,
