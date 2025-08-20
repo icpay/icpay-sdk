@@ -285,20 +285,28 @@ export class Icpay {
   }
 
   /**
-   * Fetch and cache /sdk/account info, including icpay_canister_backend
+   * Fetch and cache account info, including icpay_canister_backend (public method)
    */
   private async fetchAccountInfo(): Promise<any> {
-    this.requireSecretKey('fetchAccountInfo');
-
     if (this.accountInfoCache) {
       return this.accountInfoCache;
     }
-    const response = await this.privateApiClient!.get('/sdk/account');
-    this.accountInfoCache = response.data;
-    if (response.data && response.data.icpay_canister_backend) {
-      this.icpayCanisterId = response.data.icpay_canister_backend.toString();
+
+    try {
+      // Use public endpoint to get account info
+      const response = await this.publicApiClient.get('/sdk/public/account');
+      this.accountInfoCache = response.data;
+      if (response.data && response.data.accountCanisterId) {
+        this.icpayCanisterId = response.data.accountCanisterId.toString();
+      }
+      return this.accountInfoCache;
+    } catch (error) {
+      throw new IcpayError({
+        code: 'ACCOUNT_INFO_FETCH_FAILED',
+        message: 'Failed to fetch account information',
+        details: error
+      });
     }
-    return this.accountInfoCache;
   }
 
 
