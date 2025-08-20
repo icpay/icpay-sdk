@@ -493,8 +493,15 @@ export class Icpay {
         paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
         console.log('[ICPay SDK] payment intent created', { paymentIntentId, paymentIntentCode });
       } catch (e) {
-        // proceed without intent if API not available
-        console.log('[ICPay SDK] payment intent create failed (continuing)', e);
+        // Do not proceed without a payment intent
+        // Throw a standardized error so integrators can handle it consistently
+        throw new IcpayError({
+          code: ICPAY_ERROR_CODES.API_ERROR,
+          message: 'Failed to create payment intent. Please try again.',
+          details: e,
+          retryable: true,
+          userAction: 'Try again'
+        });
       }
 
       // Build packed memo if possible
