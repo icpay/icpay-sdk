@@ -40,6 +40,7 @@ export class Icpay {
   private verifiedLedgersCache: { data: VerifiedLedger[] | null; timestamp: number } = { data: null, timestamp: 0 };
 
   constructor(config: IcpayConfig) {
+    console.log('[ICPay SDK] constructor', { config });
     this.config = {
       environment: 'production',
       apiUrl: 'https://api.icpay.org',
