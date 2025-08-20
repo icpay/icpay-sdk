@@ -16,7 +16,7 @@ import {
   LedgerInfo,
   SendFundsUsdRequest
 } from './types';
-import { IcpayError } from './errors';
+import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
 import { IcpayWallet } from './wallet';
 import axios, { AxiosInstance } from 'axios';
 import { HttpAgent, Actor } from '@dfinity/agent';
@@ -31,8 +31,6 @@ export class Icpay {
   private publicApiClient: AxiosInstance;
   private privateApiClient: AxiosInstance | null = null;
   private connectedWallet: any = null;
-  private usePlugNPlay: boolean = false;
-  private plugNPlayConfig: Record<string, any> = {};
   private icHost: string;
   private actorProvider?: (canisterId: string, idl: any) => any;
   private icpayCanisterId: string | null = null;
@@ -54,20 +52,13 @@ export class Icpay {
 
     this.icHost = config.icHost || 'https://ic0.app';
     this.connectedWallet = config.connectedWallet || null;
-    this.usePlugNPlay = !!config.usePlugNPlay;
-    this.plugNPlayConfig = config.plugNPlayConfig || {};
     this.actorProvider = config.actorProvider;
-    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, usePlugNPlay: this.usePlugNPlay, plugNPlayConfig: this.plugNPlayConfig, actorProvider: this.actorProvider });
+    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, actorProvider: this.actorProvider });
 
-    if (this.connectedWallet) {
-      this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
-    } else if (this.usePlugNPlay) {
-      this.wallet = new IcpayWallet({ usePlugNPlay: true, plugNPlayConfig: this.plugNPlayConfig });
-    } else {
-      this.wallet = new IcpayWallet();
-    }
+    // Initialize wallet with connected wallet if provided
+    this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
 
-    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, usePlugNPlay: this.usePlugNPlay, plugNPlayConfig: this.plugNPlayConfig });
+    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet });
 
     // Create public API client (always available)
     this.publicApiClient = axios.create({
@@ -472,10 +463,10 @@ export class Icpay {
           if (actualBalance < requiredAmount) {
             const requiredFormatted = formatAmount(requiredAmount, 8, 'tokens');
             const availableFormatted = formatAmount(actualBalance, 8, 'tokens');
-            throw new IcpayError({
-              code: 'INSUFFICIENT_BALANCE',
-              message: `Insufficient token balance. Required: ${requiredFormatted}, Available: ${availableFormatted}`,
-              details: { required: requiredAmount, available: actualBalance }
+            throw createBalanceError(requiredFormatted, availableFormatted, {
+              required: requiredAmount,
+              available: actualBalance,
+              ledgerCanisterId
             });
           }
           console.log('[ICPay SDK] balance ok', { actualBalance: actualBalance.toString() });

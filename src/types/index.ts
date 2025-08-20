@@ -9,12 +9,10 @@ export interface IcpayConfig {
 
   environment?: 'development' | 'production';
   apiUrl?: string;
-  usePlugNPlay?: boolean;
-  plugNPlayConfig?: Record<string, any>;
   connectedWallet?: ConnectedWallet;
   icHost?: string; // IC network host for agent-js
   /**
-   * Optional: Provide a function to create an actor for any canister (e.g. from Plug N Play or direct agent-js)
+   * Optional: Provide a function to create an actor for any canister
    * (canisterId: string, idl: any) => ActorSubclass<any>
    */
   actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
