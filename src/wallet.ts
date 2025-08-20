@@ -2,7 +2,7 @@ import { AuthClient } from '@dfinity/auth-client';
 import { Identity } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { WalletProvider, WalletConnectionResult } from './types';
-import { IcpayError } from './errors';
+import { IcpayError, createWalletError, ICPAY_ERROR_CODES } from './errors';
 import { HttpAgent } from '@dfinity/agent';
 import { Actor } from '@dfinity/agent';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
@@ -28,17 +28,10 @@ export class IcpayWallet {
   private principal: Principal | null = null;
   private connectedProvider: string | null = null;
   private connectedWallet: any = null;
-  private usePlugNPlay: boolean = false;
-  private plugNPlayConfig: Record<string, any> = {};
 
-  constructor(options?: { connectedWallet?: any; usePlugNPlay?: boolean; plugNPlayConfig?: Record<string, any> }) {
+  constructor(options?: { connectedWallet?: any }) {
     if (options?.connectedWallet) {
       this.connectedWallet = options.connectedWallet;
-    }
-    if (options?.usePlugNPlay) {
-      this.usePlugNPlay = true;
-      this.plugNPlayConfig = options.plugNPlayConfig || {};
-      // TODO: Initialize Plug N Play here
     }
   }
 
@@ -102,17 +95,14 @@ export class IcpayWallet {
         case 'plug':
           return await this.connectPlug();
         default:
-          throw new IcpayError({
-            code: 'UNSUPPORTED_PROVIDER',
-            message: `Unsupported wallet provider: ${providerId}`
-          });
+          throw createWalletError(ICPAY_ERROR_CODES.UNSUPPORTED_PROVIDER, `Unsupported wallet provider: ${providerId}`);
       }
     } catch (error) {
-      throw new IcpayError({
-        code: 'WALLET_CONNECTION_FAILED',
-        message: `Failed to connect to ${providerId}`,
-        details: error
-      });
+      // Check if it's a user cancellation
+      if (error instanceof Error && (error.message.includes('rejected') || error.message.includes('cancelled'))) {
+        throw createWalletError(ICPAY_ERROR_CODES.WALLET_USER_CANCELLED, `Connection to ${providerId} was cancelled by user`);
+      }
+      throw createWalletError(ICPAY_ERROR_CODES.WALLET_CONNECTION_FAILED, `Failed to connect to ${providerId}`, error);
     }
   }
 
@@ -159,7 +149,7 @@ export class IcpayWallet {
    */
   private async connectOisy(): Promise<WalletConnectionResult> {
     if (typeof window === 'undefined' || !window.oisy) {
-      throw new Error('OISY wallet is not available');
+      throw createWalletError(ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, 'OISY wallet is not available');
     }
 
     try {
@@ -175,7 +165,7 @@ export class IcpayWallet {
           connected: true
         };
       } else {
-        throw new Error('OISY connection was rejected');
+        throw createWalletError(ICPAY_ERROR_CODES.WALLET_USER_CANCELLED, 'OISY connection was rejected by user');
       }
     } catch (error) {
       throw new Error(`OISY connection failed: ${error}`);
