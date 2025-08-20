@@ -1,7 +1,7 @@
 type Account = record {
   account_canister_id : nat64;
   platform_fee_percentage : nat16;
-  subaccount : opt vec nat8;
+  subaccount : opt blob;
   wallet_address : text;
   icp_account_identifier : opt text;
   platform_fee_fixed : opt nat;
@@ -71,8 +71,8 @@ type Payout = record {
   status : TransactionStatus;
   account_canister_id : nat64;
   to_principal : text;
-  to_subaccount : opt vec nat8;
-  from_subaccount : vec nat8;
+  to_subaccount : opt blob;
+  from_subaccount : blob;
   icp_account_identifier : opt text;
   timestamp_created : nat64;
   index : opt nat64;
