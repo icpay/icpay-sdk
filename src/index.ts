@@ -285,10 +285,11 @@ export class Icpay {
   }
 
   /**
-   * Fetch and cache account info, including icpay_canister_backend (public method)
+   * Fetch and cache account info, including icpayCanisterId (public method)
    */
   private async fetchAccountInfo(): Promise<any> {
     if (this.accountInfoCache) {
+      this.icpayCanisterId = this.accountInfoCache.icpayCanisterId.toString();
       return this.accountInfoCache;
     }
 
@@ -296,8 +297,8 @@ export class Icpay {
       // Use public endpoint to get account info
       const response = await this.publicApiClient.get('/sdk/public/account');
       this.accountInfoCache = response.data;
-      if (response.data && response.data.accountCanisterId) {
-        this.icpayCanisterId = response.data.accountCanisterId.toString();
+      if (response.data && response.data.icpayCanisterId) {
+        this.icpayCanisterId = response.data.icpayCanisterId.toString();
       }
       return this.accountInfoCache;
     } catch (error) {
