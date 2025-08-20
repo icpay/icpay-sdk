@@ -56,6 +56,7 @@ export class Icpay {
     this.usePlugNPlay = !!config.usePlugNPlay;
     this.plugNPlayConfig = config.plugNPlayConfig || {};
     this.actorProvider = config.actorProvider;
+    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, usePlugNPlay: this.usePlugNPlay, plugNPlayConfig: this.plugNPlayConfig, actorProvider: this.actorProvider });
 
     if (this.connectedWallet) {
       this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
@@ -65,6 +66,8 @@ export class Icpay {
       this.wallet = new IcpayWallet();
     }
 
+    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, usePlugNPlay: this.usePlugNPlay, plugNPlayConfig: this.plugNPlayConfig });
+
     // Create public API client (always available)
     this.publicApiClient = axios.create({
       baseURL: this.config.apiUrl,
@@ -73,6 +76,8 @@ export class Icpay {
         'Authorization': `Bearer ${this.config.publishableKey || this.config.secretKey}`
       }
     });
+
+    console.log('[ICPay SDK] publicApiClient', this.publicApiClient);
 
     // Create private API client (only if secret key is provided)
     if (this.config.secretKey) {
@@ -86,6 +91,8 @@ export class Icpay {
         headers: privateHeaders
       });
     }
+
+    console.log('[ICPay SDK] privateApiClient', this.privateApiClient);
   }
 
   /**
