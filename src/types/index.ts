@@ -191,7 +191,7 @@ export interface PriceCalculationResult {
   decimals: number;
 }
 
-export interface TransactionHistoryRequest {
+export interface PaymentHistoryRequest {
   accountId?: string;
   ledgerCanisterId?: string;
   fromTimestamp?: Date;
@@ -201,7 +201,7 @@ export interface TransactionHistoryRequest {
   offset?: number;
 }
 
-export interface TransactionHistoryItem {
+export interface PaymentHistoryItem {
   id: string;
   transactionId: number;
   status: 'pending' | 'completed' | 'failed';
@@ -221,12 +221,19 @@ export interface TransactionHistoryItem {
   updatedAt: Date;
 }
 
-export interface TransactionHistoryResponse {
-  transactions: TransactionHistoryItem[];
+export interface PaymentHistoryResponse {
+  payments: PaymentHistoryItem[];
   total: number;
   limit: number;
   offset: number;
   hasMore: boolean;
+}
+
+export interface GetPaymentsByPrincipalRequest {
+  principalId: string;
+  limit?: number;
+  offset?: number;
+  status?: 'pending' | 'completed' | 'failed';
 }
 
 export interface LedgerInfo {
