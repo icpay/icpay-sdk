@@ -213,6 +213,8 @@ export interface TransactionHistoryItem {
   toAddress: string;
   blockHeight?: number;
   fee?: string;
+  decimals?: number;
+  tokenPrice?: string;
   metadata?: any;
   createdAt: Date;
   updatedAt: Date;

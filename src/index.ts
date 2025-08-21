@@ -1065,17 +1065,15 @@ export class Icpay {
       return {
         transactions: response.data.transactions.map((tx: any) => ({
           id: tx.id,
-          transactionId: tx.transactionId,
           status: tx.status,
           amount: tx.amount,
-          currency: tx.currency,
           ledgerCanisterId: tx.ledgerCanisterId,
           ledgerSymbol: tx.ledgerSymbol,
           fromAddress: tx.fromAddress,
           toAddress: tx.toAddress,
-          blockHeight: tx.blockHeight,
           fee: tx.fee,
-          metadata: tx.metadata,
+          decimals: tx.decimals,
+          tokenPrice: tx.tokenPrice,
           createdAt: new Date(tx.createdAt),
           updatedAt: new Date(tx.updatedAt)
         })),
