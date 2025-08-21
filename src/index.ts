@@ -11,8 +11,9 @@ import {
   LedgerBalance,
   PriceCalculationRequest,
   PriceCalculationResult,
-  TransactionHistoryRequest,
-  TransactionHistoryResponse,
+  PaymentHistoryRequest,
+  PaymentHistoryResponse,
+  GetPaymentsByPrincipalRequest,
   LedgerInfo,
   SendFundsUsdRequest
 } from './types';
@@ -1059,10 +1060,10 @@ export class Icpay {
   }
 
   /**
-   * Get transaction history for the account (private method)
+   * Get payment history for account (requires secret key)
    */
-  async getTransactionHistory(request: TransactionHistoryRequest = {}): Promise<TransactionHistoryResponse> {
-    this.requireSecretKey('getTransactionHistory');
+  async getPaymentHistory(request: PaymentHistoryRequest = {}): Promise<PaymentHistoryResponse> {
+    this.requireSecretKey('getPaymentHistory');
     try {
       const params = new URLSearchParams();
 
@@ -1074,10 +1075,10 @@ export class Icpay {
       if (request.limit) params.append('limit', request.limit.toString());
       if (request.offset) params.append('offset', request.offset.toString());
 
-      const response = await this.privateApiClient!.get(`/sdk/transactions/history?${params.toString()}`);
+      const response = await this.privateApiClient!.get(`/sdk/payments/history?${params.toString()}`);
 
       return {
-        transactions: response.data.transactions.map((tx: any) => ({
+        payments: response.data.payments.map((tx: any) => ({
           id: tx.id,
           status: tx.status,
           amount: tx.amount,
@@ -1100,8 +1101,53 @@ export class Icpay {
       };
     } catch (error) {
       throw new IcpayError({
-        code: 'TRANSACTION_HISTORY_FETCH_FAILED',
-        message: 'Failed to fetch transaction history',
+        code: 'PAYMENT_HISTORY_FETCH_FAILED',
+        message: 'Failed to fetch payment history',
+        details: error
+      });
+    }
+  }
+
+  /**
+   * Get payments by principal ID (for connected wallet) - checks both sender_principal_id and expected_sender_principal
+   */
+  async getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse> {
+    this.requireSecretKey('getPaymentsByPrincipal');
+    try {
+      const params = new URLSearchParams();
+
+      if (request.limit) params.append('limit', request.limit.toString());
+      if (request.offset) params.append('offset', request.offset.toString());
+      if (request.status) params.append('status', request.status);
+
+      const response = await this.privateApiClient!.get(`/sdk/payments/by-principal/${request.principalId}?${params.toString()}`);
+
+      return {
+        payments: response.data.payments.map((tx: any) => ({
+          id: tx.id,
+          status: tx.status,
+          amount: tx.amount,
+          ledgerCanisterId: tx.ledgerCanisterId,
+          ledgerSymbol: tx.ledgerSymbol,
+          fromAddress: tx.fromAddress,
+          toAddress: tx.toAddress,
+          fee: tx.fee,
+          decimals: tx.decimals,
+          tokenPrice: tx.tokenPrice,
+          expectedSenderPrincipal: tx.expectedSenderPrincipal,
+          metadata: tx.metadata,
+          createdAt: new Date(tx.createdAt),
+          updatedAt: new Date(tx.updatedAt)
+        })),
+        total: response.data.total,
+        limit: response.data.limit,
+        offset: response.data.offset,
+        hasMore: response.data.hasMore
+      };
+    } catch (error) {
+      throw new IcpayError({
+        code: 'PAYMENTS_BY_PRINCIPAL_FETCH_FAILED',
+        message: 'Failed to fetch payments by principal',
         details: error
       });
     }
