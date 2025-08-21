@@ -16,6 +16,12 @@ export interface IcpayConfig {
    * (canisterId: string, idl: any) => ActorSubclass<any>
    */
   actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
+
+  /**
+   * Optional: Enable debug logging
+   * When set to true, all console.log messages will be output
+   */
+  debug?: boolean;
 }
 
 export interface ConnectedWallet {
