@@ -486,14 +486,28 @@ export class Icpay {
       let paymentIntentCode: number | null = null;
       try {
         debugLog(this.config.debug || false, 'creating payment intent');
+
+        // Get the expected sender principal from connected wallet
+        const expectedSenderPrincipal = this.connectedWallet?.owner || this.connectedWallet?.principal?.toString();
+        if (!expectedSenderPrincipal) {
+          throw new IcpayError({
+            code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED,
+            message: 'Wallet must be connected to create payment intent',
+            details: { connectedWallet: this.connectedWallet },
+            retryable: false,
+            userAction: 'Connect your wallet first'
+          });
+        }
+
         const intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
           amount: request.amount,
           ledgerCanisterId,
+          expectedSenderPrincipal,
           metadata: request.metadata || {},
         });
         paymentIntentId = intentResp.data?.paymentIntent?.id || null;
         paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
-        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode });
+        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal });
       } catch (e) {
         // Do not proceed without a payment intent
         // Throw a standardized error so integrators can handle it consistently
@@ -1074,6 +1088,8 @@ export class Icpay {
           fee: tx.fee,
           decimals: tx.decimals,
           tokenPrice: tx.tokenPrice,
+          expectedSenderPrincipal: tx.expectedSenderPrincipal,
+          metadata: tx.metadata,
           createdAt: new Date(tx.createdAt),
           updatedAt: new Date(tx.updatedAt)
         })),

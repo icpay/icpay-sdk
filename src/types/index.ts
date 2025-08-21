@@ -215,6 +215,7 @@ export interface TransactionHistoryItem {
   fee?: string;
   decimals?: number;
   tokenPrice?: string;
+  expectedSenderPrincipal?: string;
   metadata?: any;
   createdAt: Date;
   updatedAt: Date;
