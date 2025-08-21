@@ -4,7 +4,12 @@ Official SDK for Internet Computer payments with account-based authentication an
 
 ## Version History
 
-### v1.3.2 (Latest)
+### v1.3.37 (Latest)
+- Added debug configuration option for development and troubleshooting
+- All console.log statements now respect the debug setting
+- Improved logging for transaction flow and API operations
+
+### v1.3.2
 - Initial release with user-based authentication
 
 ## Installation
@@ -283,10 +288,48 @@ interface IcpayConfig {
   plugNPlayConfig?: Record<string, any>;
   connectedWallet?: ConnectedWallet;
   actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
+
+  // Debug configuration
+  debug?: boolean;
 }
+```
 ```
 
 **Note:** Either `publishableKey` (public mode) or `secretKey` (private mode) must be provided.
+
+### Debug Configuration
+
+The SDK includes a debug mode that can be enabled to output detailed console logs for development and troubleshooting:
+
+```typescript
+const icpay = new Icpay({
+  publishableKey: 'pk_live_your_key_here',
+  debug: true  // Enable debug logging
+});
+```
+
+**Debug Mode Features:**
+- Detailed logging of all SDK operations
+- Transaction flow tracking
+- API request/response logging
+- Wallet connection debugging
+- Balance checking logs
+
+**Usage:**
+- **Development**: Set `debug: true` to see detailed operation logs
+- **Production**: Leave `debug` unset or set to `false` (default) to avoid console clutter
+- **Troubleshooting**: Enable debug mode to diagnose issues with transactions or wallet connections
+
+**Example Output:**
+```
+[ICPay SDK] constructor { config: {...} }
+[ICPay SDK] sendFunds start { request: {...} }
+[ICPay SDK] checking balance { ledgerCanisterId: "...", requiredAmount: "..." }
+[ICPay SDK] balance ok { actualBalance: "..." }
+[ICPay SDK] creating payment intent
+[ICPay SDK] payment intent created { paymentIntentId: "...", paymentIntentCode: ... }
+[ICPay SDK] sendFunds done { transactionId: ..., status: "completed" }
+```
 
 ## API Reference
 

@@ -23,7 +23,7 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 import { Principal } from '@dfinity/principal';
-import { toAccountIdentifier } from './utils'; // We'll add this helper
+import { toAccountIdentifier, debugLog } from './utils';
 
 export class Icpay {
   private config: IcpayConfig;
@@ -38,12 +38,14 @@ export class Icpay {
   private verifiedLedgersCache: { data: VerifiedLedger[] | null; timestamp: number } = { data: null, timestamp: 0 };
 
   constructor(config: IcpayConfig) {
-    console.log('[ICPay SDK] constructor', { config });
     this.config = {
       environment: 'production',
       apiUrl: 'https://api.icpay.org',
+      debug: false,
       ...config
     };
+
+    debugLog(this.config.debug || false, 'constructor', { config: this.config });
 
     // Validate authentication configuration
     if (!this.config.publishableKey && !this.config.secretKey) {
@@ -53,12 +55,12 @@ export class Icpay {
     this.icHost = config.icHost || 'https://ic0.app';
     this.connectedWallet = config.connectedWallet || null;
     this.actorProvider = config.actorProvider;
-    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet, actorProvider: this.actorProvider });
+    debugLog(this.config.debug || false, 'constructor', { connectedWallet: this.connectedWallet, actorProvider: this.actorProvider });
 
     // Initialize wallet with connected wallet if provided
     this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
 
-    console.log('[ICPay SDK] constructor', { connectedWallet: this.connectedWallet });
+    debugLog(this.config.debug || false, 'constructor', { connectedWallet: this.connectedWallet });
 
     // Create public API client (always available)
     this.publicApiClient = axios.create({
@@ -69,7 +71,7 @@ export class Icpay {
       }
     });
 
-    console.log('[ICPay SDK] publicApiClient', this.publicApiClient);
+    debugLog(this.config.debug || false, 'publicApiClient created', this.publicApiClient);
 
     // Create private API client (only if secret key is provided)
     if (this.config.secretKey) {
@@ -84,7 +86,7 @@ export class Icpay {
       });
     }
 
-    console.log('[ICPay SDK] privateApiClient', this.privateApiClient);
+    debugLog(this.config.debug || false, 'privateApiClient created', this.privateApiClient);
   }
 
   /**
@@ -419,14 +421,14 @@ export class Icpay {
    */
   async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
     try {
-      console.log('[ICPay SDK] sendFunds start', { request });
+      debugLog(this.config.debug || false, 'sendFunds start', { request });
       // Fetch account info to get accountCanisterId if not provided
       let accountCanisterId = request.accountCanisterId;
       if (!accountCanisterId) {
-        console.log('[ICPay SDK] fetching account info for accountCanisterId');
+        debugLog(this.config.debug || false, 'fetching account info for accountCanisterId');
         const accountInfo = await this.getAccountInfo();
         accountCanisterId = accountInfo.accountCanisterId.toString();
-        console.log('[ICPay SDK] accountCanisterId resolved', { accountCanisterId });
+        debugLog(this.config.debug || false, 'accountCanisterId resolved', { accountCanisterId });
       }
 
       // Always use icpayCanisterId as toPrincipal
@@ -444,7 +446,7 @@ export class Icpay {
 
       // Check balance before sending
       const requiredAmount = amount;
-      console.log('[ICPay SDK] checking balance', { ledgerCanisterId, requiredAmount: requiredAmount.toString() });
+      debugLog(this.config.debug || false, 'checking balance', { ledgerCanisterId, requiredAmount: requiredAmount.toString() });
 
       // Helper function to make amounts human-readable
       const formatAmount = (amount: bigint, decimals: number = 8, symbol: string = '') => {
@@ -469,7 +471,7 @@ export class Icpay {
               ledgerCanisterId
             });
           }
-          console.log('[ICPay SDK] balance ok', { actualBalance: actualBalance.toString() });
+          debugLog(this.config.debug || false, 'balance ok', { actualBalance: actualBalance.toString() });
         } catch (balanceError) {
           // If we can't fetch the specific ledger balance, fall back to the old logic
           throw new IcpayError({
@@ -483,7 +485,7 @@ export class Icpay {
       let paymentIntentId: string | null = null;
       let paymentIntentCode: number | null = null;
       try {
-        console.log('[ICPay SDK] creating payment intent');
+        debugLog(this.config.debug || false, 'creating payment intent');
         const intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
           amount: request.amount,
           ledgerCanisterId,
@@ -491,7 +493,7 @@ export class Icpay {
         });
         paymentIntentId = intentResp.data?.paymentIntent?.id || null;
         paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
-        console.log('[ICPay SDK] payment intent created', { paymentIntentId, paymentIntentCode });
+        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode });
       } catch (e) {
         // Do not proceed without a payment intent
         // Throw a standardized error so integrators can handle it consistently
@@ -509,17 +511,17 @@ export class Icpay {
         const acctIdNum = parseInt(accountCanisterId);
         if (!isNaN(acctIdNum) && paymentIntentCode != null) {
           memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
-          console.log('[ICPay SDK] built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
+          debugLog(this.config.debug || false, 'built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
         } else if (!isNaN(acctIdNum)) {
           memo = this.createMemoWithAccountCanisterId(acctIdNum);
-          console.log('[ICPay SDK] built legacy memo', { accountCanisterId: acctIdNum });
+          debugLog(this.config.debug || false, 'built legacy memo', { accountCanisterId: acctIdNum });
         }
       } catch {}
 
       let transferResult;
       if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
-        console.log('[ICPay SDK] sending ICRC-1 transfer (ICP)');
+        debugLog(this.config.debug || false, 'sending ICRC-1 transfer (ICP)');
         transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
           toPrincipal,
@@ -529,7 +531,7 @@ export class Icpay {
         );
       } else {
         // ICRC-1 ledgers: use principal directly
-        console.log('[ICPay SDK] sending ICRC-1 transfer');
+        debugLog(this.config.debug || false, 'sending ICRC-1 transfer');
         transferResult = await this.sendFundsToLedger(
           ledgerCanisterId,
           toPrincipal,
@@ -541,13 +543,13 @@ export class Icpay {
 
       // Assume transferResult returns a block index or transaction id
       const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
-      console.log('[ICPay SDK] transfer result', { blockIndex });
+      debugLog(this.config.debug || false, 'transfer result', { blockIndex });
 
       // First, notify the canister about the ledger transaction
       let canisterTransactionId: number;
       let notifyStatus: any = null;
       try {
-        console.log('[ICPay SDK] notifying canister about ledger tx');
+        debugLog(this.config.debug || false, 'notifying canister about ledger tx');
         const notifyRes: any = await this.notifyLedgerTransaction(
           this.icpayCanisterId!,
           ledgerCanisterId,
@@ -560,10 +562,10 @@ export class Icpay {
           canisterTransactionId = parseInt(notifyRes.id, 10);
           notifyStatus = notifyRes;
         }
-        console.log('[ICPay SDK] canister notified', { canisterTransactionId });
+        debugLog(this.config.debug || false, 'canister notified', { canisterTransactionId });
       } catch (notifyError) {
         canisterTransactionId = parseInt(blockIndex, 10);
-        console.log('[ICPay SDK] notify failed, using blockIndex as tx id', { canisterTransactionId });
+        debugLog(this.config.debug || false, 'notify failed, using blockIndex as tx id', { canisterTransactionId });
       }
 
       // Poll for transaction status until completed
@@ -573,12 +575,12 @@ export class Icpay {
         status = { status: notifyStatus.status };
       } else {
         try {
-          console.log('[ICPay SDK] polling transaction status (public)', { canisterTransactionId });
+          debugLog(this.config.debug || false, 'polling transaction status (public)', { canisterTransactionId });
           status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, accountCanisterId as string, Number(blockIndex), 2000, 30);
-          console.log('[ICPay SDK] poll done', { status });
+          debugLog(this.config.debug || false, 'poll done', { status });
         } catch (e) {
           status = { status: 'pending' };
-          console.log('[ICPay SDK] poll failed, falling back to pending');
+          debugLog(this.config.debug || false, 'poll failed, falling back to pending');
         }
       }
 
@@ -614,7 +616,7 @@ export class Icpay {
         const notifyDelayMs = 1000;
         for (let attempt = 1; attempt <= maxNotifyAttempts; attempt++) {
           try {
-            console.log('[ICPay SDK] notifying API about completion', { attempt, notifyPath, paymentIntentId, canisterTransactionId });
+            debugLog(this.config.debug || false, 'notifying API about completion', { attempt, notifyPath, paymentIntentId, canisterTransactionId });
             const resp = await notifyClient.post(notifyPath, {
               paymentIntentId,
               canisterTxId: canisterTransactionId,
@@ -624,7 +626,7 @@ export class Icpay {
           } catch (e: any) {
             const status = e?.response?.status;
             const data = e?.response?.data;
-            console.log('[ICPay SDK] API notify attempt failed', { attempt, status, data });
+            debugLog(this.config.debug || false, 'API notify attempt failed', { attempt, status, data });
             // Proactively trigger a transaction sync if we get not found
             try {
               await this.triggerTransactionSync(canisterTransactionId);
@@ -635,7 +637,7 @@ export class Icpay {
           }
         }
         if (!publicNotify) {
-          console.log('[ICPay SDK] API notify failed after retries (non-fatal)');
+          debugLog(this.config.debug || false, 'API notify failed after retries (non-fatal)');
         }
       }
 
@@ -650,7 +652,7 @@ export class Icpay {
         payment: publicNotify
       };
 
-      console.log('[ICPay SDK] sendFunds done', response);
+      debugLog(this.config.debug || false, 'sendFunds done', response);
       return response;
     } catch (error) {
       // eslint-disable-next-line no-console
