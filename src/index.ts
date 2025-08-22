@@ -531,6 +531,8 @@ export class Icpay {
           memo = this.createMemoWithAccountCanisterId(acctIdNum);
           debugLog(this.config.debug || false, 'built legacy memo', { accountCanisterId: acctIdNum });
         }
+
+        debugLog(this.config.debug || false, 'memo', { memo });
       } catch {}
 
       let transferResult;
