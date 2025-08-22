@@ -22,6 +22,7 @@ export const idlFactory = ({ IDL }) => {
     'account_canister_id' : IDL.Nat64,
     'platform_fee_amount' : IDL.Nat,
     'transfer_fee' : IDL.Nat,
+    'memo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'index_to_account' : IDL.Opt(IDL.Nat64),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'notify_processing' : IDL.Bool,

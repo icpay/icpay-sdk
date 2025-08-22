@@ -123,6 +123,7 @@ export interface Transaction {
   'account_canister_id' : bigint,
   'platform_fee_amount' : bigint,
   'transfer_fee' : bigint,
+  'memo' : [] | [Uint8Array | number[]],
   'index_to_account' : [] | [bigint],
   'timestamp_to_account' : [] | [bigint],
   'notify_processing' : boolean,

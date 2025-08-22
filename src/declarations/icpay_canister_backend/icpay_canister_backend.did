@@ -107,6 +107,7 @@ type Transaction = record {
   account_canister_id : nat64;
   platform_fee_amount : nat;
   transfer_fee : nat;
+  memo : opt blob;
   index_to_account : opt nat64;
   timestamp_to_account : opt nat64;
   notify_processing : bool;
