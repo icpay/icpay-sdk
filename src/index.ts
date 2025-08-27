@@ -18,6 +18,7 @@ import {
   SendFundsUsdRequest
 } from './types';
 import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
+import { IcpayEventCenter, IcpayEventName } from './events';
 import { IcpayWallet } from './wallet';
 import axios, { AxiosInstance } from 'axios';
 import { HttpAgent, Actor } from '@dfinity/agent';
@@ -37,12 +38,15 @@ export class Icpay {
   private icpayCanisterId: string | null = null;
   private accountInfoCache: any = null;
   private verifiedLedgersCache: { data: VerifiedLedger[] | null; timestamp: number } = { data: null, timestamp: 0 };
+  private events: IcpayEventCenter;
 
   constructor(config: IcpayConfig) {
     this.config = {
       environment: 'production',
       apiUrl: 'https://api.icpay.org',
       debug: false,
+      enableEvents: true,
+      awaitServerNotification: false,
       ...config
     };
 
@@ -60,6 +64,9 @@ export class Icpay {
 
     // Initialize wallet with connected wallet if provided
     this.wallet = new IcpayWallet({ connectedWallet: this.connectedWallet });
+
+    // Initialize event center
+    this.events = new IcpayEventCenter();
 
     debugLog(this.config.debug || false, 'constructor', { connectedWallet: this.connectedWallet });
 
@@ -90,6 +97,65 @@ export class Icpay {
     debugLog(this.config.debug || false, 'privateApiClient created', this.privateApiClient);
   }
 
+  // ===== Event API (no Lit required) =====
+  on(type: IcpayEventName | string, listener: (detail: any) => void): () => void {
+    return this.events.on(type, listener);
+  }
+
+  off(type: IcpayEventName | string, listener: (detail: any) => void): void {
+    this.events.off(type, listener);
+  }
+
+  emit(type: IcpayEventName | string, detail?: any): void {
+    if (this.config.enableEvents) {
+      this.events.emit(type, detail);
+    }
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.events.addEventListener(type, listener);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.events.removeEventListener(type, listener);
+  }
+
+  dispatchEvent(event: Event): boolean {
+    return this.events.dispatchEvent(event);
+  }
+
+  private emitError(error: any): void {
+    const err = error instanceof IcpayError
+      ? error
+      : new IcpayError({
+          code: ICPAY_ERROR_CODES.UNKNOWN_ERROR,
+          message: (error && (error.message || error.toString())) || 'Unknown error',
+          details: error
+        });
+    if (this.config.enableEvents) {
+      this.events.emit('icpay-sdk-error', err);
+    }
+  }
+
+  private emitMethodStart(name: string, args?: any): void {
+    if (this.config.enableEvents) {
+      this.events.emit('icpay-sdk-method-start', { name, args });
+    }
+  }
+
+  private emitMethodSuccess(name: string, result?: any): void {
+    if (this.config.enableEvents) {
+      this.events.emit('icpay-sdk-method-success', { name, result });
+    }
+  }
+
+  private emitMethodError(name: string, error: any): void {
+    if (this.config.enableEvents) {
+      this.events.emit('icpay-sdk-method-error', { name, error });
+    }
+    this.emitError(error);
+  }
+
   /**
    * Check if SDK has secret key for private operations
    */
@@ -109,17 +175,16 @@ export class Icpay {
     }
   }
 
-
-
   /**
    * Get account information (public method - limited data)
    */
   async getAccountInfo(): Promise<PublicAccountInfo> {
+    this.emitMethodStart('getAccountInfo');
     try {
       const response = await this.publicApiClient.get('/sdk/public/account');
       const account = response.data;
 
-      return {
+      const result = {
         id: account.id,
         name: account.name,
         isActive: account.isActive,
@@ -129,12 +194,16 @@ export class Icpay {
         createdAt: new Date(account.createdAt),
         updatedAt: new Date(account.updatedAt)
       };
+      this.emitMethodSuccess('getAccountInfo', result);
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'ACCOUNT_INFO_FETCH_FAILED',
         message: 'Failed to fetch account information',
         details: error
       });
+      this.emitMethodError('getAccountInfo', err);
+      throw err;
     }
   }
 
@@ -143,12 +212,13 @@ export class Icpay {
    */
   async getDetailedAccountInfo(): Promise<AccountInfo> {
     this.requireSecretKey('getDetailedAccountInfo');
+    this.emitMethodStart('getDetailedAccountInfo');
 
     try {
       const response = await this.privateApiClient!.get('/sdk/account');
       const account = response.data;
 
-      return {
+      const result = {
         id: account.id,
         name: account.name,
         email: account.email,
@@ -159,12 +229,16 @@ export class Icpay {
         createdAt: new Date(account.createdAt),
         updatedAt: new Date(account.updatedAt)
       };
+      this.emitMethodSuccess('getDetailedAccountInfo', result);
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'ACCOUNT_INFO_FETCH_FAILED',
         message: 'Failed to fetch detailed account information',
         details: error
       });
+      this.emitMethodError('getDetailedAccountInfo', err);
+      throw err;
     }
   }
 
@@ -172,6 +246,7 @@ export class Icpay {
    * Get verified ledgers (public method)
    */
   async getVerifiedLedgers(): Promise<VerifiedLedger[]> {
+    this.emitMethodStart('getVerifiedLedgers');
     const now = Date.now();
     const cacheAge = 60 * 60 * 1000; // 60 minutes cache
 
@@ -202,13 +277,16 @@ export class Icpay {
         timestamp: now
       };
 
+      this.emitMethodSuccess('getVerifiedLedgers', { count: ledgers.length });
       return ledgers;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'VERIFIED_LEDGERS_FETCH_FAILED',
         message: 'Failed to fetch verified ledgers',
         details: error
       });
+      this.emitMethodError('getVerifiedLedgers', err);
+      throw err;
     }
   }
 
@@ -216,6 +294,7 @@ export class Icpay {
    * Get a verified ledger's canister ID by its symbol (public helper)
    */
   async getLedgerCanisterIdBySymbol(symbol: string): Promise<string> {
+    this.emitMethodStart('getLedgerCanisterIdBySymbol', { symbol });
     if (!symbol || typeof symbol !== 'string') {
       throw new IcpayError({
         code: 'INVALID_LEDGER_SYMBOL',
@@ -233,7 +312,9 @@ export class Icpay {
       });
     }
 
-    return match.canisterId;
+    const result = match.canisterId;
+    this.emitMethodSuccess('getLedgerCanisterIdBySymbol', { symbol, canisterId: result });
+    return result;
   }
 
   /**
@@ -245,16 +326,21 @@ export class Icpay {
    */
   async getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus> {
     this.requireSecretKey('getTransactionStatus');
+    this.emitMethodStart('getTransactionStatus', { canisterTransactionId });
 
     try {
       const response = await this.privateApiClient!.get(`/sdk/transactions/${canisterTransactionId}/status`);
-      return response.data;
+      const result = response.data;
+      this.emitMethodSuccess('getTransactionStatus', result);
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'TRANSACTION_STATUS_FETCH_FAILED',
         message: 'Failed to fetch transaction status',
         details: error
       });
+      this.emitMethodError('getTransactionStatus', err);
+      throw err;
     }
   }
 
@@ -266,15 +352,19 @@ export class Icpay {
    * in the canister but it's not showing up in the API database yet.
    */
   async triggerTransactionSync(canisterTransactionId: number): Promise<any> {
+    this.emitMethodStart('triggerTransactionSync', { canisterTransactionId });
     try {
       const response = await this.publicApiClient.get(`/sdk/public/transactions/${canisterTransactionId}/sync`);
+      this.emitMethodSuccess('triggerTransactionSync', response.data);
       return response.data;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'TRANSACTION_SYNC_TRIGGER_FAILED',
         message: 'Failed to trigger transaction sync from canister',
         details: error
       });
+      this.emitMethodError('triggerTransactionSync', err);
+      throw err;
     }
   }
 
@@ -310,41 +400,67 @@ export class Icpay {
    * Show wallet connection modal
    */
   async showWalletModal(): Promise<WalletConnectionResult> {
-    return await this.wallet.showConnectionModal();
+    this.emitMethodStart('showWalletModal');
+    try {
+      const res = await this.wallet.showConnectionModal();
+      this.emitMethodSuccess('showWalletModal', res);
+      return res;
+    } catch (error) {
+      this.emitMethodError('showWalletModal', error);
+      throw error;
+    }
   }
 
   /**
    * Connect to a specific wallet provider
    */
   async connectWallet(providerId: string): Promise<WalletConnectionResult> {
-    return await this.wallet.connectToProvider(providerId);
+    this.emitMethodStart('connectWallet', { providerId });
+    try {
+      const res = await this.wallet.connectToProvider(providerId);
+      this.emitMethodSuccess('connectWallet', res);
+      return res;
+    } catch (error) {
+      this.emitMethodError('connectWallet', error);
+      throw error;
+    }
   }
 
   /**
    * Get available wallet providers
    */
   getWalletProviders() {
-    return this.wallet.getProviders();
+    this.emitMethodStart('getWalletProviders');
+    const res = this.wallet.getProviders();
+    this.emitMethodSuccess('getWalletProviders', { count: Array.isArray(res) ? res.length : undefined });
+    return res;
   }
 
   /**
    * Check if a wallet provider is available
    */
   isWalletProviderAvailable(providerId: string): boolean {
-    return this.wallet.isProviderAvailable(providerId);
+    this.emitMethodStart('isWalletProviderAvailable', { providerId });
+    const res = this.wallet.isProviderAvailable(providerId);
+    this.emitMethodSuccess('isWalletProviderAvailable', { providerId, available: res });
+    return res;
   }
 
   /**
    * Get the connected wallet's account address
    */
   getAccountAddress(): string {
-    return this.wallet.getAccountAddress();
+    this.emitMethodStart('getAccountAddress');
+    const res = this.wallet.getAccountAddress();
+    this.emitMethodSuccess('getAccountAddress', { accountAddress: res });
+    return res;
   }
 
   /**
    * Get balance for a specific ledger canister
    */
   async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
+    this.emitMethodStart('getLedgerBalance', { ledgerCanisterId });
     try {
       // Extract principal from connected wallet
       let principal: string | null = null;
@@ -374,9 +490,11 @@ export class Icpay {
         subaccount: []
       });
 
-      return BigInt(result);
+      const out = BigInt(result);
+      this.emitMethodSuccess('getLedgerBalance', { ledgerCanisterId, balance: out.toString() });
+      return out;
     } catch (error) {
-      console.error(`[ICPay SDK] getLedgerBalance error for ${ledgerCanisterId}:`, error);
+      this.emitMethodError('getLedgerBalance', error);
       throw error;
     }
   }
@@ -421,6 +539,7 @@ export class Icpay {
    * This is now a real transaction
    */
   async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
+    this.emitMethodStart('sendFunds', { request: { ...request, amount: typeof request.amount === 'string' ? request.amount : String(request.amount) } });
     try {
       debugLog(this.config.debug || false, 'sendFunds start', { request });
       // Fetch account info to get accountCanisterId if not provided
@@ -509,16 +628,27 @@ export class Icpay {
         paymentIntentId = intentResp.data?.paymentIntent?.id || null;
         paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
         debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal });
+        // Emit transaction created event
+        if (paymentIntentId) {
+          this.emit('icpay-sdk-transaction-created', {
+            paymentIntentId,
+            amount: request.amount,
+            ledgerCanisterId,
+            expectedSenderPrincipal
+          });
+        }
       } catch (e) {
         // Do not proceed without a payment intent
         // Throw a standardized error so integrators can handle it consistently
-        throw new IcpayError({
+        const err = new IcpayError({
           code: ICPAY_ERROR_CODES.API_ERROR,
           message: 'Failed to create payment intent. Please try again.',
           details: e,
           retryable: true,
           userAction: 'Try again'
         });
+        this.emitError(err);
+        throw err;
       }
 
       // Build packed memo if possible
@@ -623,10 +753,10 @@ export class Icpay {
         }
       }
 
-      // 5) Notify API about completion with intent and transaction id (always public endpoint)
-      // Retry up to 5 times with small delay, also try triggering a sync in-between
+      // 5) Notify API about completion with intent and transaction id
+      // Optionally await based on config.awaitServerNotification
       let publicNotify: any = undefined;
-      {
+      const notifyApi = async () => {
         const notifyClient = this.publicApiClient;
         const notifyPath = '/sdk/public/payments/notify';
         const maxNotifyAttempts = 5;
@@ -638,8 +768,7 @@ export class Icpay {
               paymentIntentId,
               canisterTxId: canisterTransactionId,
             });
-            publicNotify = resp.data;
-            break;
+            return resp.data;
           } catch (e: any) {
             const status = e?.response?.status;
             const data = e?.response?.data;
@@ -653,9 +782,22 @@ export class Icpay {
             }
           }
         }
-        if (!publicNotify) {
-          debugLog(this.config.debug || false, 'API notify failed after retries (non-fatal)');
-        }
+        debugLog(this.config.debug || false, 'API notify failed after retries (non-fatal)');
+        return undefined;
+      };
+
+      if (this.config.awaitServerNotification) {
+        publicNotify = await notifyApi();
+      } else {
+        // fire-and-forget
+        notifyApi()
+          .then((data) => {
+            // Optionally emit a success for the async notify step
+            this.emitMethodSuccess('sendFunds.notifyApi', { paymentIntentId, canisterTransactionId, data });
+          })
+          .catch((err) => {
+            this.emitMethodError('sendFunds.notifyApi', err);
+          });
       }
 
       const response = {
@@ -670,18 +812,27 @@ export class Icpay {
       };
 
       debugLog(this.config.debug || false, 'sendFunds done', response);
+      if (statusString === 'completed') {
+        this.emit('icpay-sdk-transaction-completed', response);
+      } else if (statusString === 'failed') {
+        this.emit('icpay-sdk-transaction-failed', response);
+      } else {
+        this.emit('icpay-sdk-transaction-updated', response);
+      }
+      this.emitMethodSuccess('sendFunds', response);
       return response;
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('[ICPay SDK] sendFunds error details:', error);
       if (error instanceof IcpayError) {
+        this.emitMethodError('sendFunds', error);
         throw error;
       }
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'TRANSACTION_FAILED',
         message: 'Failed to send funds',
         details: error
       });
+      this.emitMethodError('sendFunds', err);
+      throw err;
     }
   }
 
@@ -712,6 +863,7 @@ export class Icpay {
    * Poll for transaction status using anonymous actor (no signature required)
    */
   async pollTransactionStatus(canisterId: string, transactionId: number, accountCanisterId: string, indexReceived: number, intervalMs = 2000, maxAttempts = 30): Promise<any> {
+    this.emitMethodStart('pollTransactionStatus', { canisterId, transactionId, accountCanisterId, indexReceived, intervalMs, maxAttempts });
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         // Use public-only method
@@ -739,6 +891,7 @@ export class Icpay {
 
         if (status && status.status) {
           if (this.isTransactionCompleted(status.status)) {
+            this.emitMethodSuccess('pollTransactionStatus', { attempt, status });
             return status; // Return immediately when completed
           }
           // If not completed, continue polling
@@ -746,6 +899,7 @@ export class Icpay {
 
         // Check if status is an object with Ok/Err pattern
         if (status && typeof status === 'object' && ((status as any).Ok || (status as any).Err)) {
+          this.emitMethodSuccess('pollTransactionStatus', { attempt, status });
           return status; // Return immediately when we find a valid status
         }
 
@@ -755,6 +909,9 @@ export class Icpay {
         }
 
       } catch (error) {
+        if (attempt === maxAttempts - 1) {
+          this.emitMethodError('pollTransactionStatus', error);
+        }
         // Wait before next attempt
         if (attempt < maxAttempts - 1) {
           await new Promise(resolve => setTimeout(resolve, intervalMs));
@@ -762,7 +919,9 @@ export class Icpay {
       }
     }
 
-    throw new Error('Transaction status polling timed out');
+    const err = new Error('Transaction status polling timed out');
+    this.emitMethodError('pollTransactionStatus', err);
+    throw err;
   }
 
   /**
@@ -792,6 +951,7 @@ export class Icpay {
    * Notify canister about ledger transaction using anonymous actor (no signature required)
    */
   async notifyLedgerTransaction(canisterId: string, ledgerCanisterId: string, blockIndex: bigint): Promise<string> {
+    this.emitMethodStart('notifyLedgerTransaction', { canisterId, ledgerCanisterId, blockIndex: blockIndex.toString() });
     // Create anonymous actor for canister notifications (no signature required)
     const agent = new HttpAgent({ host: this.icHost });
     const actor = Actor.createActor(icpayIdl, { agent, canisterId });
@@ -802,15 +962,21 @@ export class Icpay {
     }) as any;
 
     if (result && result.Ok) {
+      this.emitMethodSuccess('notifyLedgerTransaction', { result: result.Ok });
       return result.Ok;
     } else if (result && result.Err) {
-      throw new Error(result.Err);
+      const err = new Error(result.Err);
+      this.emitMethodError('notifyLedgerTransaction', err);
+      throw err;
     } else {
-      throw new Error('Unexpected canister notify result');
+      const err = new Error('Unexpected canister notify result');
+      this.emitMethodError('notifyLedgerTransaction', err);
+      throw err;
     }
   }
 
   async getTransactionStatusPublic(canisterId: string, canisterTransactionId: number, indexReceived: number, accountCanisterId: string): Promise<any> {
+    this.emitMethodStart('getTransactionStatusPublic', { canisterId, canisterTransactionId, indexReceived, accountCanisterId });
     const agent = new HttpAgent({ host: this.icHost });
     const actor = Actor.createActor(icpayIdl, { agent, canisterId });
     const acctIdNum = parseInt(accountCanisterId);
@@ -819,7 +985,9 @@ export class Icpay {
       BigInt(canisterTransactionId),
       [indexReceived]
     );
-    return res || { status: 'pending' };
+    const result = res || { status: 'pending' };
+    this.emitMethodSuccess('getTransactionStatusPublic', result);
+    return result;
   }
 
   /**
@@ -833,15 +1001,18 @@ export class Icpay {
     memo?: Uint8Array,
     host?: string
   ): Promise<any> {
+    this.emitMethodStart('sendFundsToLedger', { ledgerCanisterId, toPrincipal, amount: amount.toString(), hasMemo: !!memo });
     let actor;
     if (this.actorProvider) {
       actor = this.actorProvider(ledgerCanisterId, ledgerIdl);
     } else {
-      throw new Error('actorProvider is required for sending funds');
+      const err = new Error('actorProvider is required for sending funds');
+      this.emitMethodError('sendFundsToLedger', err);
+      throw err;
     }
 
     // ICRC-1 transfer
-    return await actor.icrc1_transfer({
+    const res = await actor.icrc1_transfer({
       to: { owner: Principal.fromText(toPrincipal), subaccount: [] },
       amount,
       fee: [], // Always include fee, even if empty
@@ -849,12 +1020,15 @@ export class Icpay {
       from_subaccount: [],
       created_at_time: [],
     });
+    this.emitMethodSuccess('sendFundsToLedger', res);
+    return res;
   }
 
   /**
    * Get transaction by ID using get_transactions filter (alternative to get_transaction)
    */
   async getTransactionByFilter(transactionId: number): Promise<any> {
+    this.emitMethodStart('getTransactionByFilter', { transactionId });
     try {
       if (!this.icpayCanisterId) {
         await this.fetchAccountInfo();
@@ -881,12 +1055,14 @@ export class Icpay {
 
       if (result && result.transactions) {
         const transaction = result.transactions.find((tx: any) => tx.id.toString() === transactionId.toString());
+        this.emitMethodSuccess('getTransactionByFilter', { found: !!transaction });
         return transaction;
       }
 
+      this.emitMethodSuccess('getTransactionByFilter', { found: false });
       return null;
     } catch (error) {
-      console.error('getTransactionByFilter error:', error);
+      this.emitMethodError('getTransactionByFilter', error);
       throw error;
     }
   }
@@ -897,6 +1073,7 @@ export class Icpay {
    * Get balance for all verified ledgers for the connected wallet (public method)
    */
   async getAllLedgerBalances(): Promise<AllLedgerBalances> {
+    this.emitMethodStart('getAllLedgerBalances');
     try {
       if (!this.isWalletConnected()) {
         throw new IcpayError({
@@ -935,22 +1112,31 @@ export class Icpay {
             totalBalancesUSD += humanReadableBalance * ledger.currentPrice;
           }
         } catch (error) {
-          console.warn(`Failed to fetch balance for ledger ${ledger.symbol}:`, error);
+          this.emit('icpay-sdk-method-error', {
+            name: 'getAllLedgerBalances.getLedgerBalance',
+            error,
+            ledgerSymbol: ledger.symbol,
+            ledgerCanisterId: ledger.canisterId
+          });
           // Continue with other ledgers even if one fails
         }
       }
 
-      return {
+      const result = {
         balances,
         totalBalancesUSD: totalBalancesUSD > 0 ? totalBalancesUSD : undefined,
         lastUpdated: new Date()
       };
+      this.emitMethodSuccess('getAllLedgerBalances', { count: balances.length, totalUSD: result.totalBalancesUSD });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'BALANCES_FETCH_FAILED',
         message: 'Failed to fetch all ledger balances',
         details: error
       });
+      this.emitMethodError('getAllLedgerBalances', err);
+      throw err;
     }
   }
 
@@ -958,6 +1144,7 @@ export class Icpay {
    * Get balance for a specific ledger by canister ID (public method)
    */
   async getSingleLedgerBalance(ledgerCanisterId: string): Promise<LedgerBalance> {
+    this.emitMethodStart('getSingleLedgerBalance', { ledgerCanisterId });
     try {
       if (!this.isWalletConnected()) {
         throw new IcpayError({
@@ -980,7 +1167,7 @@ export class Icpay {
       const rawBalance = await this.getLedgerBalance(ledgerCanisterId);
       const formattedBalance = this.formatBalance(rawBalance.toString(), ledger.decimals);
 
-      return {
+      const result = {
         ledgerId: ledger.id,
         ledgerName: ledger.name,
         ledgerSymbol: ledger.symbol,
@@ -992,12 +1179,16 @@ export class Icpay {
         lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
         lastUpdated: new Date()
       };
+      this.emitMethodSuccess('getSingleLedgerBalance', { ledgerCanisterId, balance: result.balance });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'SINGLE_BALANCE_FETCH_FAILED',
         message: `Failed to fetch balance for ledger ${ledgerCanisterId}`,
         details: error
       });
+      this.emitMethodError('getSingleLedgerBalance', err);
+      throw err;
     }
   }
 
@@ -1005,6 +1196,7 @@ export class Icpay {
    * Calculate token amount from USD price for a specific ledger (public method)
    */
   async calculateTokenAmountFromUSD(request: PriceCalculationRequest): Promise<PriceCalculationResult> {
+    this.emitMethodStart('calculateTokenAmountFromUSD', { usdAmount: request.usdAmount, ledgerCanisterId: request.ledgerCanisterId, ledgerSymbol: request.ledgerSymbol });
     try {
       const { usdAmount, ledgerCanisterId, ledgerSymbol } = request;
 
@@ -1041,7 +1233,7 @@ export class Icpay {
       // Convert to smallest unit and truncate decimals to get whole number for blockchain
       const tokenAmountDecimals = Math.floor(tokenAmountHuman * Math.pow(10, ledger.decimals)).toString();
 
-      return {
+      const result = {
         usdAmount,
         ledgerCanisterId: ledger.canisterId,
         ledgerSymbol: ledger.symbol,
@@ -1052,12 +1244,16 @@ export class Icpay {
         tokenAmountDecimals,
         decimals: ledger.decimals
       };
+      this.emitMethodSuccess('calculateTokenAmountFromUSD', { ledgerCanisterId: result.ledgerCanisterId, tokenAmountDecimals });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'PRICE_CALCULATION_FAILED',
         message: 'Failed to calculate token amount from USD',
         details: error
       });
+      this.emitMethodError('calculateTokenAmountFromUSD', err);
+      throw err;
     }
   }
 
@@ -1066,6 +1262,7 @@ export class Icpay {
    */
   async getPaymentHistory(request: PaymentHistoryRequest = {}): Promise<PaymentHistoryResponse> {
     this.requireSecretKey('getPaymentHistory');
+    this.emitMethodStart('getPaymentHistory', { request });
     try {
       const params = new URLSearchParams();
 
@@ -1079,7 +1276,7 @@ export class Icpay {
 
       const response = await this.privateApiClient!.get(`/sdk/payments/history?${params.toString()}`);
 
-      return {
+      const result = {
         payments: response.data.payments.map((tx: any) => ({
           id: tx.id,
           status: tx.status,
@@ -1101,12 +1298,16 @@ export class Icpay {
         offset: response.data.offset,
         hasMore: response.data.hasMore
       };
+      this.emitMethodSuccess('getPaymentHistory', { total: result.total });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'PAYMENT_HISTORY_FETCH_FAILED',
         message: 'Failed to fetch payment history',
         details: error
       });
+      this.emitMethodError('getPaymentHistory', err);
+      throw err;
     }
   }
 
@@ -1115,6 +1316,7 @@ export class Icpay {
    */
   async getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse> {
     this.requireSecretKey('getPaymentsByPrincipal');
+    this.emitMethodStart('getPaymentsByPrincipal', { request });
     try {
       const params = new URLSearchParams();
 
@@ -1124,7 +1326,7 @@ export class Icpay {
 
       const response = await this.privateApiClient!.get(`/sdk/payments/by-principal/${request.principalId}?${params.toString()}`);
 
-      return {
+      const result = {
         payments: response.data.payments.map((tx: any) => ({
           id: tx.id,
           status: tx.status,
@@ -1146,12 +1348,16 @@ export class Icpay {
         offset: response.data.offset,
         hasMore: response.data.hasMore
       };
+      this.emitMethodSuccess('getPaymentsByPrincipal', { total: result.total });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'PAYMENTS_BY_PRINCIPAL_FETCH_FAILED',
         message: 'Failed to fetch payments by principal',
         details: error
       });
+      this.emitMethodError('getPaymentsByPrincipal', err);
+      throw err;
     }
   }
 
@@ -1159,11 +1365,12 @@ export class Icpay {
    * Get detailed ledger information including price data (public method)
    */
   async getLedgerInfo(ledgerCanisterId: string): Promise<LedgerInfo> {
+    this.emitMethodStart('getLedgerInfo', { ledgerCanisterId });
     try {
       const response = await this.publicApiClient.get(`/sdk/public/ledgers/${ledgerCanisterId}`);
       const ledger = response.data;
 
-      return {
+      const result = {
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
@@ -1175,12 +1382,16 @@ export class Icpay {
         currentPrice: ledger.currentPrice || undefined,
         lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
       };
+      this.emitMethodSuccess('getLedgerInfo', { ledgerCanisterId });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'LEDGER_INFO_FETCH_FAILED',
         message: `Failed to fetch ledger info for ${ledgerCanisterId}`,
         details: error
       });
+      this.emitMethodError('getLedgerInfo', err);
+      throw err;
     }
   }
 
@@ -1188,6 +1399,7 @@ export class Icpay {
    * Send funds from USD to a specific ledger (public method)
    */
   async sendFundsUsd(request: SendFundsUsdRequest): Promise<TransactionResponse> {
+    this.emitMethodStart('sendFundsUsd', { request });
     try {
       // Convert usdAmount to number if it's a string
       const usdAmount = typeof request.usdAmount === 'string' ? parseFloat(request.usdAmount) : request.usdAmount;
@@ -1204,16 +1416,21 @@ export class Icpay {
         metadata: request.metadata
       };
 
-      return await this.sendFunds(createTransactionRequest);
+      const res = await this.sendFunds(createTransactionRequest);
+      this.emitMethodSuccess('sendFundsUsd', res);
+      return res;
     } catch (error) {
       if (error instanceof IcpayError) {
+        this.emitMethodError('sendFundsUsd', error);
         throw error;
       }
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'SEND_FUNDS_USD_FAILED',
         message: 'Failed to send funds from USD',
         details: error
       });
+      this.emitMethodError('sendFundsUsd', err);
+      throw err;
     }
   }
 
@@ -1221,10 +1438,11 @@ export class Icpay {
    * Get all ledgers with price information (public method)
    */
   async getAllLedgersWithPrices(): Promise<LedgerInfo[]> {
+    this.emitMethodStart('getAllLedgersWithPrices');
     try {
       const response = await this.publicApiClient.get('/sdk/public/ledgers/all-with-prices');
 
-      return response.data.map((ledger: any) => ({
+      const result = response.data.map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
@@ -1236,12 +1454,16 @@ export class Icpay {
         currentPrice: ledger.currentPrice || undefined,
         lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
       }));
+      this.emitMethodSuccess('getAllLedgersWithPrices', { count: result.length });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'LEDGERS_WITH_PRICES_FETCH_FAILED',
         message: 'Failed to fetch ledgers with price information',
         details: error
       });
+      this.emitMethodError('getAllLedgersWithPrices', err);
+      throw err;
     }
   }
 
@@ -1250,10 +1472,11 @@ export class Icpay {
    */
   async getAccountWalletBalances(): Promise<AllLedgerBalances> {
     this.requireSecretKey('getAccountWalletBalances');
+    this.emitMethodStart('getAccountWalletBalances');
     try {
       const response = await this.privateApiClient!.get('/sdk/account/wallet-balances');
 
-      return {
+      const result = {
         balances: response.data.balances.map((balance: any) => ({
           ledgerId: balance.ledgerId,
           ledgerName: balance.ledgerName,
@@ -1269,12 +1492,16 @@ export class Icpay {
         totalBalancesUSD: response.data.totalBalancesUSD,
         lastUpdated: new Date(response.data.lastUpdated)
       };
+      this.emitMethodSuccess('getAccountWalletBalances', { count: result.balances.length, totalUSD: result.totalBalancesUSD });
+      return result;
     } catch (error) {
-      throw new IcpayError({
+      const err = new IcpayError({
         code: 'ACCOUNT_WALLET_BALANCES_FETCH_FAILED',
         message: 'Failed to fetch account wallet balances',
         details: error
       });
+      this.emitMethodError('getAccountWalletBalances', err);
+      throw err;
     }
   }
 
@@ -1297,6 +1524,7 @@ export class Icpay {
 export * from './types';
 export { IcpayError } from './errors';
 export { IcpayWallet } from './wallet';
+export * from './events';
 
 // Default export
 export default Icpay;

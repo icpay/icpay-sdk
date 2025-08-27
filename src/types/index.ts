@@ -22,6 +22,17 @@ export interface IcpayConfig {
    * When set to true, all console.log messages will be output
    */
   debug?: boolean;
+
+  /**
+   * Enable or disable SDK events emission. Defaults to true (enabled).
+   */
+  enableEvents?: boolean;
+
+  /**
+   * If true, wait for server notification result in sendFunds.
+   * Defaults to false (do not await; fire-and-forget notify).
+   */
+  awaitServerNotification?: boolean;
 }
 
 export interface ConnectedWallet {
