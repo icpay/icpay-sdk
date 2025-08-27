@@ -15,7 +15,10 @@ import {
   PaymentHistoryResponse,
   GetPaymentsByPrincipalRequest,
   LedgerInfo,
-  SendFundsUsdRequest
+  SendFundsUsdRequest,
+  AccountPublic,
+  LedgerPublic,
+  SdkLedger,
 } from './types';
 import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
 import { IcpayEventCenter, IcpayEventName } from './events';
@@ -26,6 +29,7 @@ import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/ic
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 import { Principal } from '@dfinity/principal';
 import { toAccountIdentifier, debugLog } from './utils';
+import { IcpayProtected } from './protected';
 
 export class Icpay {
   private config: IcpayConfig;
@@ -37,15 +41,16 @@ export class Icpay {
   private actorProvider?: (canisterId: string, idl: any) => any;
   private icpayCanisterId: string | null = null;
   private accountInfoCache: any = null;
-  private verifiedLedgersCache: { data: VerifiedLedger[] | null; timestamp: number } = { data: null, timestamp: 0 };
+  private verifiedLedgersCache: { data: LedgerPublic[] | null; timestamp: number } = { data: null, timestamp: 0 };
   private events: IcpayEventCenter;
+  public protected: IcpayProtected;
 
   constructor(config: IcpayConfig) {
     this.config = {
       environment: 'production',
       apiUrl: 'https://api.icpay.org',
       debug: false,
-      enableEvents: true,
+      enableEvents: false,
       awaitServerNotification: false,
       ...config
     };
@@ -95,6 +100,15 @@ export class Icpay {
     }
 
     debugLog(this.config.debug || false, 'privateApiClient created', this.privateApiClient);
+
+    // Initialize protected wrapper
+    this.protected = new IcpayProtected({
+      publicApiClient: this.publicApiClient,
+      privateApiClient: this.privateApiClient,
+      emitStart: (name, args) => this.emitMethodStart(name, args),
+      emitSuccess: (name, result) => this.emitMethodSuccess(name, result),
+      emitError: (name, error) => this.emitMethodError(name, error),
+    });
   }
 
   // ===== Event API (no Lit required) =====
@@ -178,21 +192,19 @@ export class Icpay {
   /**
    * Get account information (public method - limited data)
    */
-  async getAccountInfo(): Promise<PublicAccountInfo> {
+  async getAccountInfo(): Promise<AccountPublic> {
     this.emitMethodStart('getAccountInfo');
     try {
       const response = await this.publicApiClient.get('/sdk/public/account');
       const account = response.data;
 
-      const result = {
+      const result: AccountPublic = {
         id: account.id,
         name: account.name,
         isActive: account.isActive,
         isLive: account.isLive,
         accountCanisterId: account.accountCanisterId,
-        walletAddress: account.walletAddress,
-        createdAt: new Date(account.createdAt),
-        updatedAt: new Date(account.updatedAt)
+        icpayCanisterId: account.icpayCanisterId,
       };
       this.emitMethodSuccess('getAccountInfo', result);
       return result;
@@ -211,41 +223,13 @@ export class Icpay {
    * Get detailed account information (private method - full data)
    */
   async getDetailedAccountInfo(): Promise<AccountInfo> {
-    this.requireSecretKey('getDetailedAccountInfo');
-    this.emitMethodStart('getDetailedAccountInfo');
-
-    try {
-      const response = await this.privateApiClient!.get('/sdk/account');
-      const account = response.data;
-
-      const result = {
-        id: account.id,
-        name: account.name,
-        email: account.email,
-        isActive: account.isActive,
-        isLive: account.isLive,
-        accountCanisterId: account.accountCanisterId,
-        walletAddress: account.walletAddress,
-        createdAt: new Date(account.createdAt),
-        updatedAt: new Date(account.updatedAt)
-      };
-      this.emitMethodSuccess('getDetailedAccountInfo', result);
-      return result;
-    } catch (error) {
-      const err = new IcpayError({
-        code: 'ACCOUNT_INFO_FETCH_FAILED',
-        message: 'Failed to fetch detailed account information',
-        details: error
-      });
-      this.emitMethodError('getDetailedAccountInfo', err);
-      throw err;
-    }
+    return this.protected.getDetailedAccountInfo();
   }
 
   /**
    * Get verified ledgers (public method)
    */
-  async getVerifiedLedgers(): Promise<VerifiedLedger[]> {
+  async getVerifiedLedgers(): Promise<LedgerPublic[]> {
     this.emitMethodStart('getVerifiedLedgers');
     const now = Date.now();
     const cacheAge = 60 * 60 * 1000; // 60 minutes cache
@@ -257,7 +241,7 @@ export class Icpay {
 
     try {
       const response = await this.publicApiClient.get('/sdk/public/ledgers/verified');
-      const ledgers = response.data.map((ledger: any) => ({
+      const ledgers: LedgerPublic[] = response.data.map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
@@ -266,9 +250,8 @@ export class Icpay {
         logoUrl: ledger.logoUrl,
         verified: ledger.verified,
         fee: ledger.fee,
-        // Price-related fields
-        currentPrice: ledger.currentPrice || null,
-        lastPriceUpdate: ledger.lastPriceUpdate || null
+        currentPrice: ledger.currentPrice ?? null,
+        lastPriceUpdate: ledger.lastPriceUpdate ?? null,
       }));
 
       // Update cache
@@ -325,23 +308,7 @@ export class Icpay {
    * If a transaction is not found, a sync notification will be automatically triggered.
    */
   async getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus> {
-    this.requireSecretKey('getTransactionStatus');
-    this.emitMethodStart('getTransactionStatus', { canisterTransactionId });
-
-    try {
-      const response = await this.privateApiClient!.get(`/sdk/transactions/${canisterTransactionId}/status`);
-      const result = response.data;
-      this.emitMethodSuccess('getTransactionStatus', result);
-      return result;
-    } catch (error) {
-      const err = new IcpayError({
-        code: 'TRANSACTION_STATUS_FETCH_FAILED',
-        message: 'Failed to fetch transaction status',
-        details: error
-      });
-      this.emitMethodError('getTransactionStatus', err);
-      throw err;
-    }
+    return this.protected.getTransactionStatus(canisterTransactionId);
   }
 
   /**
@@ -1261,126 +1228,44 @@ export class Icpay {
    * Get payment history for account (requires secret key)
    */
   async getPaymentHistory(request: PaymentHistoryRequest = {}): Promise<PaymentHistoryResponse> {
-    this.requireSecretKey('getPaymentHistory');
-    this.emitMethodStart('getPaymentHistory', { request });
-    try {
-      const params = new URLSearchParams();
-
-      if (request.accountId) params.append('accountId', request.accountId);
-      if (request.ledgerCanisterId) params.append('ledgerCanisterId', request.ledgerCanisterId);
-      if (request.fromTimestamp) params.append('fromTimestamp', request.fromTimestamp.toISOString());
-      if (request.toTimestamp) params.append('toTimestamp', request.toTimestamp.toISOString());
-      if (request.status) params.append('status', request.status);
-      if (request.limit) params.append('limit', request.limit.toString());
-      if (request.offset) params.append('offset', request.offset.toString());
-
-      const response = await this.privateApiClient!.get(`/sdk/payments/history?${params.toString()}`);
-
-      const result = {
-        payments: response.data.payments.map((tx: any) => ({
-          id: tx.id,
-          status: tx.status,
-          amount: tx.amount,
-          ledgerCanisterId: tx.ledgerCanisterId,
-          ledgerSymbol: tx.ledgerSymbol,
-          fromAddress: tx.fromAddress,
-          toAddress: tx.toAddress,
-          fee: tx.fee,
-          decimals: tx.decimals,
-          tokenPrice: tx.tokenPrice,
-          expectedSenderPrincipal: tx.expectedSenderPrincipal,
-          metadata: tx.metadata,
-          createdAt: new Date(tx.createdAt),
-          updatedAt: new Date(tx.updatedAt)
-        })),
-        total: response.data.total,
-        limit: response.data.limit,
-        offset: response.data.offset,
-        hasMore: response.data.hasMore
-      };
-      this.emitMethodSuccess('getPaymentHistory', { total: result.total });
-      return result;
-    } catch (error) {
-      const err = new IcpayError({
-        code: 'PAYMENT_HISTORY_FETCH_FAILED',
-        message: 'Failed to fetch payment history',
-        details: error
-      });
-      this.emitMethodError('getPaymentHistory', err);
-      throw err;
-    }
+    return this.protected.getPaymentHistory(request);
   }
 
   /**
    * Get payments by principal ID (for connected wallet) - checks both sender_principal_id and expected_sender_principal
    */
   async getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse> {
-    this.requireSecretKey('getPaymentsByPrincipal');
-    this.emitMethodStart('getPaymentsByPrincipal', { request });
-    try {
-      const params = new URLSearchParams();
-
-      if (request.limit) params.append('limit', request.limit.toString());
-      if (request.offset) params.append('offset', request.offset.toString());
-      if (request.status) params.append('status', request.status);
-
-      const response = await this.privateApiClient!.get(`/sdk/payments/by-principal/${request.principalId}?${params.toString()}`);
-
-      const result = {
-        payments: response.data.payments.map((tx: any) => ({
-          id: tx.id,
-          status: tx.status,
-          amount: tx.amount,
-          ledgerCanisterId: tx.ledgerCanisterId,
-          ledgerSymbol: tx.ledgerSymbol,
-          fromAddress: tx.fromAddress,
-          toAddress: tx.toAddress,
-          fee: tx.fee,
-          decimals: tx.decimals,
-          tokenPrice: tx.tokenPrice,
-          expectedSenderPrincipal: tx.expectedSenderPrincipal,
-          metadata: tx.metadata,
-          createdAt: new Date(tx.createdAt),
-          updatedAt: new Date(tx.updatedAt)
-        })),
-        total: response.data.total,
-        limit: response.data.limit,
-        offset: response.data.offset,
-        hasMore: response.data.hasMore
-      };
-      this.emitMethodSuccess('getPaymentsByPrincipal', { total: result.total });
-      return result;
-    } catch (error) {
-      const err = new IcpayError({
-        code: 'PAYMENTS_BY_PRINCIPAL_FETCH_FAILED',
-        message: 'Failed to fetch payments by principal',
-        details: error
-      });
-      this.emitMethodError('getPaymentsByPrincipal', err);
-      throw err;
-    }
+    return this.protected.getPaymentsByPrincipal(request);
   }
 
   /**
    * Get detailed ledger information including price data (public method)
    */
-  async getLedgerInfo(ledgerCanisterId: string): Promise<LedgerInfo> {
+  async getLedgerInfo(ledgerCanisterId: string): Promise<SdkLedger> {
     this.emitMethodStart('getLedgerInfo', { ledgerCanisterId });
     try {
       const response = await this.publicApiClient.get(`/sdk/public/ledgers/${ledgerCanisterId}`);
       const ledger = response.data;
 
-      const result = {
+      const result: SdkLedger = {
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
         canisterId: ledger.canisterId,
+        standard: ledger.standard,
         decimals: ledger.decimals,
-        logoUrl: ledger.logoUrl || undefined,
+        logoUrl: ledger.logoUrl ?? null,
         verified: ledger.verified,
-        fee: ledger.fee || undefined,
-        currentPrice: ledger.currentPrice || undefined,
-        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
+        fee: ledger.fee ?? null,
+        network: ledger.network,
+        description: ledger.description ?? null,
+        lastBlockIndex: ledger.lastBlockIndex ?? null,
+        coingeckoId: ledger.coingeckoId ?? null,
+        currentPrice: ledger.currentPrice ?? null,
+        priceFetchMethod: ledger.priceFetchMethod ?? null,
+        lastPriceUpdate: ledger.lastPriceUpdate ?? null,
+        createdAt: ledger.createdAt,
+        updatedAt: ledger.updatedAt,
       };
       this.emitMethodSuccess('getLedgerInfo', { ledgerCanisterId });
       return result;
@@ -1437,22 +1322,30 @@ export class Icpay {
     /**
    * Get all ledgers with price information (public method)
    */
-  async getAllLedgersWithPrices(): Promise<LedgerInfo[]> {
+  async getAllLedgersWithPrices(): Promise<SdkLedger[]> {
     this.emitMethodStart('getAllLedgersWithPrices');
     try {
       const response = await this.publicApiClient.get('/sdk/public/ledgers/all-with-prices');
 
-      const result = response.data.map((ledger: any) => ({
+      const result: SdkLedger[] = response.data.map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
         canisterId: ledger.canisterId,
+        standard: ledger.standard,
         decimals: ledger.decimals,
-        logoUrl: ledger.logoUrl || undefined,
+        logoUrl: ledger.logoUrl ?? null,
         verified: ledger.verified,
-        fee: ledger.fee || undefined,
-        currentPrice: ledger.currentPrice || undefined,
-        lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined
+        fee: ledger.fee ?? null,
+        network: ledger.network,
+        description: ledger.description ?? null,
+        lastBlockIndex: ledger.lastBlockIndex ?? null,
+        coingeckoId: ledger.coingeckoId ?? null,
+        currentPrice: ledger.currentPrice ?? null,
+        priceFetchMethod: ledger.priceFetchMethod ?? null,
+        lastPriceUpdate: ledger.lastPriceUpdate ?? null,
+        createdAt: ledger.createdAt,
+        updatedAt: ledger.updatedAt,
       }));
       this.emitMethodSuccess('getAllLedgersWithPrices', { count: result.length });
       return result;
@@ -1471,38 +1364,7 @@ export class Icpay {
    * Get account wallet balances (from API, not connected wallet) (private method)
    */
   async getAccountWalletBalances(): Promise<AllLedgerBalances> {
-    this.requireSecretKey('getAccountWalletBalances');
-    this.emitMethodStart('getAccountWalletBalances');
-    try {
-      const response = await this.privateApiClient!.get('/sdk/account/wallet-balances');
-
-      const result = {
-        balances: response.data.balances.map((balance: any) => ({
-          ledgerId: balance.ledgerId,
-          ledgerName: balance.ledgerName,
-          ledgerSymbol: balance.ledgerSymbol,
-          canisterId: balance.canisterId,
-          balance: balance.balance,
-          formattedBalance: balance.formattedBalance,
-          decimals: balance.decimals,
-          currentPrice: balance.currentPrice,
-          lastPriceUpdate: balance.lastPriceUpdate ? new Date(balance.lastPriceUpdate) : undefined,
-          lastUpdated: new Date(balance.lastUpdated)
-        })),
-        totalBalancesUSD: response.data.totalBalancesUSD,
-        lastUpdated: new Date(response.data.lastUpdated)
-      };
-      this.emitMethodSuccess('getAccountWalletBalances', { count: result.balances.length, totalUSD: result.totalBalancesUSD });
-      return result;
-    } catch (error) {
-      const err = new IcpayError({
-        code: 'ACCOUNT_WALLET_BALANCES_FETCH_FAILED',
-        message: 'Failed to fetch account wallet balances',
-        details: error
-      });
-      this.emitMethodError('getAccountWalletBalances', err);
-      throw err;
-    }
+    return this.protected.getAccountWalletBalances();
   }
 
   /**

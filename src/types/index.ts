@@ -145,9 +145,7 @@ export interface PublicAccountInfo {
   isActive: boolean;
   isLive: boolean;
   accountCanisterId: number;
-  walletAddress: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  icpayCanisterId?: string;
 }
 
 export interface IcpayError {
@@ -238,6 +236,257 @@ export interface PaymentHistoryResponse {
   limit: number;
   offset: number;
   hasMore: boolean;
+}
+
+// Public SDK responses
+export interface PublicCreateIntentResponse {
+  paymentIntentId: string;
+  paymentIntentCode: number | null;
+  payment: PaymentPublic;
+  paymentIntent: SdkPaymentIntent;
+}
+
+export interface PublicNotifyResponse {
+  paymentId: string;
+  paymentIntentId: string | null;
+  status: PaymentStatus;
+  canisterTxId: number | null;
+  transactionId: string | null;
+}
+
+export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'canceled' | 'refunded';
+export type PaymentIntentStatus = 'requires_payment' | 'processing' | 'succeeded' | 'completed' | 'failed' | 'canceled';
+export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'void';
+export type RefundStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type PayoutStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type LedgerStandard = 'ICRC-1' | 'ICRC-2' | 'ICRC-3' | 'ICRC-10' | 'ICRC-21' | 'ICP' | 'EXT';
+export type LedgerNetwork = 'mainnet' | 'testnet';
+export type PriceFetchMethod = 'coingecko' | 'icpswap';
+export type WalletNetwork = 'ic' | 'eth' | 'btc' | 'sol';
+export type WalletType = 'user' | 'platform' | 'canister';
+
+export interface AccountPublic {
+  id: string;
+  name: string | null;
+  isActive: boolean;
+  isLive: boolean;
+  accountCanisterId: number;
+  icpayCanisterId?: string;
+}
+
+export interface LedgerPublic {
+  id: string;
+  name: string;
+  symbol: string;
+  canisterId: string;
+  decimals: number;
+  logoUrl: string | null;
+  verified: boolean;
+  fee: string | null;
+  currentPrice: number | null;
+  lastPriceUpdate: string | null;
+}
+
+export interface PaymentPublic {
+  id: string;
+  accountId: string;
+  paymentIntentId: string;
+  transactionId: string | null;
+  canisterTxId: number | null;
+  amount: string;
+  ledgerCanisterId: string;
+  status: PaymentStatus;
+  invoiceId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkLedger {
+  id: string;
+  name: string;
+  symbol: string;
+  canisterId: string;
+  standard: LedgerStandard;
+  decimals: number;
+  logoUrl: string | null;
+  verified: boolean;
+  fee: string | null;
+  network: LedgerNetwork;
+  description: string | null;
+  lastBlockIndex: string | null;
+  coingeckoId: string | null;
+  currentPrice: number | null;
+  priceFetchMethod: PriceFetchMethod | null;
+  lastPriceUpdate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkPaymentIntent {
+  id: string;
+  accountId: string;
+  amount: string;
+  ledgerCanisterId: string;
+  description: string | null;
+  expectedSenderPrincipal: string | null;
+  status: PaymentIntentStatus;
+  metadata: Record<string, unknown>;
+  intentCode: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkPayment {
+  id: string;
+  accountId: string;
+  paymentIntentId: string;
+  transactionId: string | null;
+  canisterTxId: number | null;
+  amount: string;
+  ledgerCanisterId: string;
+  status: PaymentStatus;
+  invoiceId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkInvoice {
+  id: string;
+  accountId: string;
+  paymentId: string | null;
+  invoiceNumber: string | null;
+  amountDue: string;
+  amountPaid: string | null;
+  currency: string | null;
+  status: InvoiceStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkTransaction {
+  id: string;
+  accountId: string;
+  canisterTxId: number | null;
+  accountCanisterId: string | null;
+  senderPrincipalId: string;
+  transactionType: 'payment' | 'refund' | 'transfer' | 'withdrawal';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  amount: string;
+  accountAmount: string | null;
+  platformFeeAmount: string | null;
+  tokenPrice: number | null;
+  ledgerId: string | null;
+  ledgerCanisterId: string;
+  timestamp: number | null;
+  indexReceived: number | null;
+  indexToAccount: number | null;
+  timestampReceived: number | null;
+  timestampToAccount: number | null;
+  metadata: Record<string, unknown>;
+  memo: string | null;
+  processedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkRefund {
+  id: string;
+  accountId: string;
+  transactionId: string | null;
+  canisterRefundId: string | null;
+  canisterTxId: string | null;
+  ledgerCanisterId: string | null;
+  amount: string;
+  accountAmount: string | null;
+  platformRefundAmount: string | null;
+  status: RefundStatus;
+  statusMessage: string | null;
+  indexPlatformToAccount: string | null;
+  indexToSender: string | null;
+  timestampPlatformToAccount: string | null;
+  timestampToSender: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkPayout {
+  id: string;
+  accountId: string;
+  walletId: string | null;
+  userId: string | null;
+  amount: string;
+  ledgerId: string | null;
+  ledgerCanisterId: string | null;
+  accountCanisterId: string | null;
+  fromSubaccount: string | null;
+  toWalletAddress: string | null;
+  toWalletSubaccount: string | null;
+  blockIndex: string | null;
+  ledgerTxHash: string | null;
+  status: PayoutStatus;
+  statusMessage: string | null;
+  retryCount: number;
+  ipAddress: string | null;
+  userAgent: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkWallet {
+  id: string;
+  accountId: string | null;
+  walletName: string;
+  walletAddress: string;
+  network: WalletNetwork;
+  type: WalletType;
+  subaccount: string | null;
+  icpAccountIdentifier: string | null;
+  isActive: boolean;
+  isChanged: boolean;
+  previousAddress: string | null;
+  isPrimary: boolean;
+  isInternal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkWebhookEvent {
+  id: string;
+  webhookEndpointId: string;
+  eventType: string;
+  eventData: any;
+  endpointUrl: string;
+  relationName: string | null;
+  relationId: string | null;
+  status: 'pending' | 'sent' | 'delivered' | 'failed' | 'cancelled';
+  attempts: number;
+  maxAttempts: number;
+  nextRetryAt: string | null;
+  sentAt: string | null;
+  deliveredAt: string | null;
+  responseStatus: number | null;
+  responseHeaders: Record<string, string> | null;
+  responseBody: string | null;
+  requestHeaders: Record<string, string> | null;
+  requestBody: string | null;
+  errorMessage: string | null;
+  errorCode: string | null;
+  processingTimeMs: number | null;
+  signature: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SdkPaymentAggregate {
+  payment: SdkPayment;
+  intent: SdkPaymentIntent | null;
+  invoice: SdkInvoice | null;
+  transaction: SdkTransaction | null;
 }
 
 export interface GetPaymentsByPrincipalRequest {
