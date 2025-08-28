@@ -51,8 +51,8 @@ const icpay = new Icpay({
 });
 
 // Server-side operations
-const transactions = await icpay.getTransactionHistory();
-const accountBalances = await icpay.getAccountWalletBalances();
+const transactions = await icpay.protected.getTransactionHistory();
+const accountBalances = await icpay.protected.getAccountWalletBalances();
 ```
 
 ## Authentication Modes

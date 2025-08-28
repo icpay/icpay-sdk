@@ -2,19 +2,11 @@ import {
   IcpayConfig,
   CreateTransactionRequest,
   TransactionResponse,
-  TransactionStatus,
-  AccountInfo,
-  PublicAccountInfo,
-  VerifiedLedger,
   WalletConnectionResult,
   AllLedgerBalances,
   LedgerBalance,
   PriceCalculationRequest,
   PriceCalculationResult,
-  PaymentHistoryRequest,
-  PaymentHistoryResponse,
-  GetPaymentsByPrincipalRequest,
-  LedgerInfo,
   SendFundsUsdRequest,
   AccountPublic,
   LedgerPublic,
@@ -28,8 +20,8 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 import { Principal } from '@dfinity/principal';
-import { toAccountIdentifier, debugLog } from './utils';
-import { IcpayProtected } from './protected';
+import { debugLog } from './utils';
+import { createProtectedApi, ProtectedApi } from './protected';
 
 export class Icpay {
   private config: IcpayConfig;
@@ -43,7 +35,7 @@ export class Icpay {
   private accountInfoCache: any = null;
   private verifiedLedgersCache: { data: LedgerPublic[] | null; timestamp: number } = { data: null, timestamp: 0 };
   private events: IcpayEventCenter;
-  public protected: IcpayProtected;
+  public protected: ProtectedApi;
 
   constructor(config: IcpayConfig) {
     this.config = {
@@ -101,9 +93,8 @@ export class Icpay {
 
     debugLog(this.config.debug || false, 'privateApiClient created', this.privateApiClient);
 
-    // Initialize protected wrapper
-    this.protected = new IcpayProtected({
-      publicApiClient: this.publicApiClient,
+    // Initialize protected API
+    this.protected = createProtectedApi({
       privateApiClient: this.privateApiClient,
       emitStart: (name, args) => this.emitMethodStart(name, args),
       emitSuccess: (name, result) => this.emitMethodSuccess(name, result),
@@ -220,13 +211,6 @@ export class Icpay {
   }
 
   /**
-   * Get detailed account information (private method - full data)
-   */
-  async getDetailedAccountInfo(): Promise<AccountInfo> {
-    return this.protected.getDetailedAccountInfo();
-  }
-
-  /**
    * Get verified ledgers (public method)
    */
   async getVerifiedLedgers(): Promise<LedgerPublic[]> {
@@ -298,17 +282,6 @@ export class Icpay {
     const result = match.canisterId;
     this.emitMethodSuccess('getLedgerCanisterIdBySymbol', { symbol, canisterId: result });
     return result;
-  }
-
-  /**
-   * Get transaction status by canister transaction ID (private method)
-   *
-   * This method returns transaction status from the ICPay API database.
-   * Note: Canister transactions may take up to 1 minute to sync to the API database.
-   * If a transaction is not found, a sync notification will be automatically triggered.
-   */
-  async getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus> {
-    return this.protected.getTransactionStatus(canisterTransactionId);
   }
 
   /**
@@ -1225,20 +1198,6 @@ export class Icpay {
   }
 
   /**
-   * Get payment history for account (requires secret key)
-   */
-  async getPaymentHistory(request: PaymentHistoryRequest = {}): Promise<PaymentHistoryResponse> {
-    return this.protected.getPaymentHistory(request);
-  }
-
-  /**
-   * Get payments by principal ID (for connected wallet) - checks both sender_principal_id and expected_sender_principal
-   */
-  async getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse> {
-    return this.protected.getPaymentsByPrincipal(request);
-  }
-
-  /**
    * Get detailed ledger information including price data (public method)
    */
   async getLedgerInfo(ledgerCanisterId: string): Promise<SdkLedger> {
@@ -1358,13 +1317,6 @@ export class Icpay {
       this.emitMethodError('getAllLedgersWithPrices', err);
       throw err;
     }
-  }
-
-  /**
-   * Get account wallet balances (from API, not connected wallet) (private method)
-   */
-  async getAccountWalletBalances(): Promise<AllLedgerBalances> {
-    return this.protected.getAccountWalletBalances();
   }
 
   /**
