@@ -70,7 +70,7 @@ async function testEnhancedBalanceFeatures() {
     // 5. Test getting account wallet balances (from API)
     console.log('\n5. Testing getAccountWalletBalances...');
     try {
-      const accountBalances = await icpay.getAccountWalletBalances();
+      const accountBalances = await icpay.protected.getAccountWalletBalances();
       console.log('Account Wallet Balances:', {
         totalBalancesUSD: accountBalances.totalBalancesUSD,
         lastUpdated: accountBalances.lastUpdated,

@@ -87,7 +87,7 @@ async function example() {
 
     // 8. Check transaction status
     console.log('\nChecking transaction status...');
-    const status = await icpay.getTransactionStatus(transaction.transactionId);
+    const status = await icpay.protected.getTransactionStatus(transaction.transactionId);
     console.log('Transaction Status:', status);
 
     // 9. Get account information

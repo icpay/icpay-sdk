@@ -137,7 +137,7 @@ async function privateExample() {
 
     // 9. Get account wallet balances (from API, private method)
     console.log('\n9. Fetching account wallet balances from API...');
-    const accountWalletBalances = await icpay.getAccountWalletBalances();
+    const accountWalletBalances = await icpay.protected.getAccountWalletBalances();
     console.log('Account Wallet Balances:', {
       totalBalancesUSD: accountWalletBalances.totalBalancesUSD,
       lastUpdated: accountWalletBalances.lastUpdated,
@@ -197,7 +197,7 @@ async function privateExample() {
 
       // 13. Get transaction status (private method)
       console.log('\n13. Checking transaction status...');
-      const transactionStatus = await icpay.getTransactionStatus(transaction.transactionId);
+      const transactionStatus = await icpay.protected.getTransactionStatus(transaction.transactionId);
       console.log('Transaction Status:', {
         transactionId: transactionStatus.transactionId,
         status: transactionStatus.status,
