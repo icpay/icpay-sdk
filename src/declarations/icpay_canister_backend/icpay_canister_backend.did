@@ -6,6 +6,7 @@ type Account = record {
   icp_account_identifier : opt text;
   platform_fee_fixed : opt nat;
   is_active : bool;
+  splits : vec SplitRule;
 };
 type AccountRecord = record { account_canister_id : nat64; account : Account };
 type CanisterMetrics = record {
@@ -101,6 +102,13 @@ type Result_1 = variant { Ok : NotifyResult; Err : text };
 type Result_2 = variant { Ok : Payout; Err : text };
 type Result_3 = variant { Ok : nat; Err : text };
 type Result_4 = variant { Ok : text; Err : text };
+type Split = record {
+  account_canister_id : nat64;
+  index_block : opt nat64;
+  timestamp : opt nat64;
+  amount : nat;
+};
+type SplitRule = record { account_canister_id : nat64; percentage : nat16 };
 type Transaction = record {
   id : nat;
   status : TransactionStatus;
@@ -108,7 +116,6 @@ type Transaction = record {
   platform_fee_amount : nat;
   transfer_fee : nat;
   memo : opt blob;
-  index_to_account : opt nat64;
   timestamp_to_account : opt nat64;
   notify_processing : bool;
   timestamp : nat64;
@@ -116,6 +123,7 @@ type Transaction = record {
   sender_principal_id : text;
   account_amount : nat;
   ledger_canister_id : text;
+  splits : vec Split;
   timestamp_received : opt nat64;
   amount : nat;
 };

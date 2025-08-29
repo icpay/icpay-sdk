@@ -10,6 +10,7 @@ export interface Account {
   'icp_account_identifier' : [] | [string],
   'platform_fee_fixed' : [] | [bigint],
   'is_active' : boolean,
+  'splits' : Array<SplitRule>,
 }
 export interface AccountRecord {
   'account_canister_id' : bigint,
@@ -117,6 +118,16 @@ export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
 export type Result_4 = { 'Ok' : string } |
   { 'Err' : string };
+export interface Split {
+  'account_canister_id' : bigint,
+  'index_block' : [] | [bigint],
+  'timestamp' : [] | [bigint],
+  'amount' : bigint,
+}
+export interface SplitRule {
+  'account_canister_id' : bigint,
+  'percentage' : number,
+}
 export interface Transaction {
   'id' : bigint,
   'status' : TransactionStatus,
@@ -124,7 +135,6 @@ export interface Transaction {
   'platform_fee_amount' : bigint,
   'transfer_fee' : bigint,
   'memo' : [] | [Uint8Array | number[]],
-  'index_to_account' : [] | [bigint],
   'timestamp_to_account' : [] | [bigint],
   'notify_processing' : boolean,
   'timestamp' : bigint,
@@ -132,6 +142,7 @@ export interface Transaction {
   'sender_principal_id' : string,
   'account_amount' : bigint,
   'ledger_canister_id' : string,
+  'splits' : Array<Split>,
   'timestamp_received' : [] | [bigint],
   'amount' : bigint,
 }
