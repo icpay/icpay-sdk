@@ -1,4 +1,8 @@
 export const idlFactory = ({ IDL }) => {
+  const SplitRule = IDL.Record({
+    'account_canister_id' : IDL.Nat64,
+    'percentage' : IDL.Nat16,
+  });
   const Account = IDL.Record({
     'account_canister_id' : IDL.Nat64,
     'platform_fee_percentage' : IDL.Nat16,
@@ -7,6 +11,7 @@ export const idlFactory = ({ IDL }) => {
     'icp_account_identifier' : IDL.Opt(IDL.Text),
     'platform_fee_fixed' : IDL.Opt(IDL.Nat),
     'is_active' : IDL.Bool,
+    'splits' : IDL.Vec(SplitRule),
   });
   const Result = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
   const TransactionStatus = IDL.Variant({
@@ -16,6 +21,12 @@ export const idlFactory = ({ IDL }) => {
     'Completed' : IDL.Null,
     'Pending' : IDL.Null,
   });
+  const Split = IDL.Record({
+    'account_canister_id' : IDL.Nat64,
+    'index_block' : IDL.Opt(IDL.Nat64),
+    'timestamp' : IDL.Opt(IDL.Nat64),
+    'amount' : IDL.Nat,
+  });
   const Transaction = IDL.Record({
     'id' : IDL.Nat,
     'status' : TransactionStatus,
@@ -23,7 +34,6 @@ export const idlFactory = ({ IDL }) => {
     'platform_fee_amount' : IDL.Nat,
     'transfer_fee' : IDL.Nat,
     'memo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
-    'index_to_account' : IDL.Opt(IDL.Nat64),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'notify_processing' : IDL.Bool,
     'timestamp' : IDL.Nat64,
@@ -31,6 +41,7 @@ export const idlFactory = ({ IDL }) => {
     'sender_principal_id' : IDL.Text,
     'account_amount' : IDL.Nat,
     'ledger_canister_id' : IDL.Text,
+    'splits' : IDL.Vec(Split),
     'timestamp_received' : IDL.Opt(IDL.Nat64),
     'amount' : IDL.Nat,
   });
