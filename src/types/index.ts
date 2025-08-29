@@ -292,9 +292,13 @@ export interface PaymentPublic {
   accountId: string;
   paymentIntentId: string;
   transactionId: string | null;
+  transactionSplitId?: string | null;
   canisterTxId: number | null;
   amount: string;
   ledgerCanisterId: string;
+  ledgerTxId?: string | null;
+  accountCanisterId?: number | null;
+  basePaymentAccountId?: string | null;
   status: PaymentStatus;
   invoiceId: string | null;
   metadata: Record<string, unknown>;
@@ -342,9 +346,13 @@ export interface SdkPayment {
   accountId: string;
   paymentIntentId: string;
   transactionId: string | null;
+  transactionSplitId?: string | null;
   canisterTxId: number | null;
   amount: string;
   ledgerCanisterId: string;
+  ledgerTxId?: string | null;
+  accountCanisterId?: number | null;
+  basePaymentAccountId?: string | null;
   status: PaymentStatus;
   invoiceId: string | null;
   metadata: Record<string, unknown>;
