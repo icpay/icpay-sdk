@@ -106,6 +106,7 @@ type Split = record {
   account_canister_id : nat64;
   index_block : opt nat64;
   timestamp : opt nat64;
+  account_percentage : nat16;
   amount : nat;
 };
 type SplitRule = record { account_canister_id : nat64; percentage : nat16 };

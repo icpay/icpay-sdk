@@ -122,6 +122,7 @@ export interface Split {
   'account_canister_id' : bigint,
   'index_block' : [] | [bigint],
   'timestamp' : [] | [bigint],
+  'account_percentage' : number,
   'amount' : bigint,
 }
 export interface SplitRule {
