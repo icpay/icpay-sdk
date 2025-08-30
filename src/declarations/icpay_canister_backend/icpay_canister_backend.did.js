@@ -25,6 +25,7 @@ export const idlFactory = ({ IDL }) => {
     'account_canister_id' : IDL.Nat64,
     'index_block' : IDL.Opt(IDL.Nat64),
     'timestamp' : IDL.Opt(IDL.Nat64),
+    'account_percentage' : IDL.Nat16,
     'amount' : IDL.Nat,
   });
   const Transaction = IDL.Record({
