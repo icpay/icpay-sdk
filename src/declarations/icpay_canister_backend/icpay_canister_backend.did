@@ -1,0 +1,193 @@
+type Account = record {
+  account_canister_id : nat64;
+  platform_fee_percentage : nat16;
+  subaccount : opt blob;
+  wallet_address : text;
+  icp_account_identifier : opt text;
+  platform_fee_fixed : opt nat;
+  is_active : bool;
+  splits : vec SplitRule;
+};
+type AccountRecord = record { account_canister_id : nat64; account : Account };
+type CanisterMetrics = record {
+  total_accounts : nat32;
+  cycles_balance : nat64;
+  controllers : vec principal;
+  is_healthy : bool;
+  last_update_timestamp : nat64;
+  active_accounts : nat32;
+  memory_size_bytes : nat64;
+  total_transactions : nat32;
+  platform_wallet : text;
+};
+type Icrc21ConsentInfo = record {
+  metadata : Icrc21ConsentMessageMetadata;
+  consent_message : Icrc21ConsentMessage;
+};
+type Icrc21ConsentMessage = variant {
+  LineDisplayMessage : record { pages : vec Icrc21Page };
+  GenericDisplayMessage : text;
+};
+type Icrc21ConsentMessageMetadata = record {
+  utc_offset_minutes : opt int16;
+  language : text;
+};
+type Icrc21ConsentMessageRequest = record {
+  arg : blob;
+  method : text;
+  user_preferences : Icrc21ConsentMessageSpec;
+};
+type Icrc21ConsentMessageResponse = variant {
+  Ok : Icrc21ConsentInfo;
+  Err : Icrc21Error;
+};
+type Icrc21ConsentMessageSpec = record {
+  metadata : Icrc21ConsentMessageMetadata;
+  device_spec : opt Icrc21DeviceSpec;
+};
+type Icrc21DeviceSpec = variant {
+  GenericDisplay;
+  LineDisplay : record { characters_per_line : nat16; lines_per_page : nat16 };
+};
+type Icrc21Error = variant {
+  GenericError : record { description : text; error_code : nat64 };
+  InsufficientPayment : Icrc21ErrorInfo;
+  UnsupportedCanisterCall : Icrc21ErrorInfo;
+  ConsentMessageUnavailable : Icrc21ErrorInfo;
+};
+type Icrc21ErrorInfo = record { description : text };
+type Icrc21Page = record { lines : vec text };
+type LedgerTransactionNotification = record {
+  block_index : nat64;
+  ledger_canister_id : text;
+};
+type NotifyResult = record {
+  id : text;
+  status : TransactionStatus;
+  amount : nat;
+};
+type Payout = record {
+  id : nat;
+  fee : nat;
+  status : TransactionStatus;
+  account_canister_id : nat64;
+  to_principal : text;
+  to_subaccount : opt blob;
+  from_subaccount : blob;
+  icp_account_identifier : opt text;
+  timestamp_created : nat64;
+  index : opt nat64;
+  ledger_canister_id : text;
+  timestamp_completed : opt nat64;
+  amount : nat;
+  status_message : opt text;
+};
+type PublicTxStatus = record { status : TransactionStatus; amount : nat };
+type Refund = record {
+  status : TransactionStatus;
+  timestamp_platform_to_account : opt nat64;
+  account_canister_id : nat64;
+  original_tx_id : nat;
+  notify_processing : bool;
+  timestamp_created : nat64;
+  timestamp_to_sender : opt nat64;
+  ledger_canister_id : text;
+  amount : nat;
+  platform_refund_amount : nat;
+  index_to_sender : opt nat64;
+  index_platform_to_account : opt nat64;
+};
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : NotifyResult; Err : text };
+type Result_2 = variant { Ok : Payout; Err : text };
+type Result_3 = variant { Ok : nat; Err : text };
+type Result_4 = variant { Ok : text; Err : text };
+type Split = record {
+  account_canister_id : nat64;
+  index_block : opt nat64;
+  timestamp : opt nat64;
+  account_percentage : nat16;
+  amount : nat;
+};
+type SplitRule = record { account_canister_id : nat64; percentage : nat16 };
+type Transaction = record {
+  id : nat;
+  status : TransactionStatus;
+  account_canister_id : nat64;
+  platform_fee_amount : nat;
+  transfer_fee : nat;
+  memo : opt blob;
+  timestamp_to_account : opt nat64;
+  notify_processing : bool;
+  timestamp : nat64;
+  index_received : opt nat64;
+  sender_principal_id : text;
+  account_amount : nat;
+  ledger_canister_id : text;
+  splits : vec Split;
+  timestamp_received : opt nat64;
+  amount : nat;
+};
+type TransactionFilter = record {
+  from_timestamp : opt nat64;
+  status : opt TransactionStatus;
+  account_canister_id : opt nat64;
+  from_id : opt nat;
+  offset : opt nat32;
+  limit : opt nat32;
+  to_timestamp : opt nat64;
+  ledger_canister_id : opt text;
+};
+type TransactionResult = record {
+  transactions : vec Transaction;
+  total_count : nat32;
+  has_more : bool;
+};
+type TransactionStatus = variant {
+  Failed : text;
+  Processed;
+  Received;
+  Completed;
+  Pending;
+};
+type WithdrawRequest = record {
+  recipient : text;
+  ledger_canister_id : text;
+  amount : nat;
+};
+service : () -> {
+  add_account : (nat64, Account) -> (Result);
+  get_account : (nat64) -> (opt Account) query;
+  get_account_transactions : (nat64, opt nat32, opt nat32) -> (
+      TransactionResult,
+    ) query;
+  get_canister_info : () -> (CanisterMetrics);
+  get_controller : () -> (principal) query;
+  get_controllers : () -> (vec principal) query;
+  get_ledger_transactions : (text, opt nat32, opt nat32) -> (
+      TransactionResult,
+    ) query;
+  get_payout : (nat) -> (opt Payout) query;
+  get_platform_wallet : () -> (text) query;
+  get_refund_by_original_tx_id : (nat) -> (opt Refund) query;
+  get_transaction : (nat) -> (opt Transaction) query;
+  get_transaction_status_public : (nat64, nat, opt nat64) -> (
+      opt PublicTxStatus,
+    ) query;
+  get_transactions : (TransactionFilter) -> (TransactionResult) query;
+  icrc21_canister_call_consent_message : (Icrc21ConsentMessageRequest) -> (
+      Icrc21ConsentMessageResponse,
+    );
+  initialize_controllers : () -> (Result);
+  list_accounts : () -> (vec AccountRecord) query;
+  notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
+  remove_account : (nat64) -> (Result);
+  request_payout : (nat64, text, nat) -> (Result_2);
+  request_refund : (nat) -> (Result_3);
+  retry_payout : (nat) -> (Result_2);
+  set_controller : (principal) -> (Result);
+  set_platform_wallet : (text) -> (Result);
+  update_account : (nat64, Account) -> (Result);
+  update_controllers : () -> (Result);
+  withdraw_funds : (WithdrawRequest) -> (Result_4);
+}

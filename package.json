@@ -1,0 +1,58 @@
+{
+  "name": "@icpay/sdk",
+  "version": "1.3.59",
+  "description": "Official icpay SDK for Internet Computer payments",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && pnpm run copy-declarations",
+    "copy-declarations": "mkdir -p dist && cp -r src/declarations dist/",
+    "postbuild": "pnpm run copy-declarations",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src/**/*.ts",
+    "prepare": "pnpm run build"
+  },
+  "keywords": [
+    "icpay",
+    "internet-computer",
+    "icp",
+    "blockchain",
+    "payments",
+    "sdk"
+  ],
+  "author": "icpay",
+  "license": "MIT",
+  "dependencies": {
+    "@dfinity/agent": "^2.4.1",
+    "@dfinity/auth-client": "^2.4.1",
+    "@dfinity/candid": "^2.4.1",
+    "@dfinity/identity": "^2.4.1",
+    "@dfinity/ledger-icp": "^3.0.0",
+    "@dfinity/principal": "^2.4.1",
+    "@dfinity/sns": "^3.7.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.8.0",
+    "@typescript-eslint/parser": "^6.8.0",
+    "eslint": "^8.51.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.0.3",
+    "typescript": "^5.2.2"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/icpay/icpay-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/icpay/icpay-sdk/issues"
+  },
+  "homepage": "https://github.com/icpay/icpay-sdk#readme"
+}
