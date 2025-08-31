@@ -116,7 +116,7 @@ export interface TransactionResponse {
   timestamp: Date;
   description?: string;
   metadata?: Record<string, any>;
-  payment?: PaymentObject;
+  payment?: PublicNotifyResponse;
 }
 
 export interface TransactionStatus {
@@ -534,9 +534,3 @@ export interface PaymentIntent {
   createdAt: string;
 }
 
-export interface PaymentObject {
-  payment: any;
-  intent: any;
-  invoice?: any;
-  transaction?: any;
-}
