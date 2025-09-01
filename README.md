@@ -6,17 +6,17 @@ Official SDK for integrating Internet Computer payments with ICPay.
 
 Using pnpm:
 ```bash
-pnpm add @ic-pay/sdk
+pnpm add @ic-pay/icpay-sdk
 ```
 
 Using yarn:
 ```bash
-yarn add @ic-pay/sdk
+yarn add @ic-pay/icpay-sdk
 ```
 
 Using npm:
 ```bash
-npm install @ic-pay/sdk
+npm install @ic-pay/icpay-sdk
 ```
 
 ## Documentation
