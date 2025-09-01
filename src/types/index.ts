@@ -146,6 +146,7 @@ export interface PublicAccountInfo {
   isLive: boolean;
   accountCanisterId: number;
   icpayCanisterId?: string;
+  branding?: AccountBranding | null;
 }
 
 export interface IcpayError {
@@ -272,6 +273,16 @@ export interface AccountPublic {
   isLive: boolean;
   accountCanisterId: number;
   icpayCanisterId?: string;
+  branding?: AccountBranding | null;
+}
+
+export interface AccountBranding {
+  logoUrl?: string | null;
+  faviconUrl?: string | null;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+  statementDescriptor?: string | null;
+  statementDescriptorSuffix?: string | null;
 }
 
 export interface LedgerPublic {

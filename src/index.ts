@@ -196,6 +196,7 @@ export class Icpay {
         isLive: account.isLive,
         accountCanisterId: account.accountCanisterId,
         icpayCanisterId: account.icpayCanisterId,
+        branding: account.branding || null,
       };
       this.emitMethodSuccess('getAccountInfo', result);
       return result;
