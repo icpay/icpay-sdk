@@ -15,19 +15,19 @@ import {
 import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
 import { IcpayEventCenter, IcpayEventName } from './events';
 import { IcpayWallet } from './wallet';
-import axios, { AxiosInstance } from 'axios';
 import { HttpAgent, Actor } from '@dfinity/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 import { Principal } from '@dfinity/principal';
 import { debugLog } from './utils';
 import { createProtectedApi, ProtectedApi } from './protected';
+import { HttpClient } from './http';
 
 export class Icpay {
   private config: IcpayConfig;
   private wallet: IcpayWallet;
-  private publicApiClient: AxiosInstance;
-  private privateApiClient: AxiosInstance | null = null;
+  private publicApiClient: HttpClient;
+  private privateApiClient: HttpClient | null = null;
   private connectedWallet: any = null;
   private icHost: string;
   private actorProvider?: (canisterId: string, idl: any) => any;
@@ -68,11 +68,11 @@ export class Icpay {
     debugLog(this.config.debug || false, 'constructor', { connectedWallet: this.connectedWallet });
 
     // Create public API client (always available)
-    this.publicApiClient = axios.create({
-      baseURL: this.config.apiUrl,
+    this.publicApiClient = new HttpClient({
+      baseURL: this.config.apiUrl || 'https://api.icpay.org',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.publishableKey || this.config.secretKey}`
+        'Authorization': `Bearer ${this.config.publishableKey || this.config.secretKey || ''}`
       }
     });
 
@@ -82,13 +82,10 @@ export class Icpay {
     if (this.config.secretKey) {
       const privateHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.secretKey}`
+        'Authorization': `Bearer ${this.config.secretKey || ''}`
       };
 
-      this.privateApiClient = axios.create({
-        baseURL: this.config.apiUrl,
-        headers: privateHeaders
-      });
+      this.privateApiClient = new HttpClient({ baseURL: this.config.apiUrl || 'https://api.icpay.org', headers: privateHeaders });
     }
 
     debugLog(this.config.debug || false, 'privateApiClient created', this.privateApiClient);
@@ -186,8 +183,7 @@ export class Icpay {
   async getAccountInfo(): Promise<AccountPublic> {
     this.emitMethodStart('getAccountInfo');
     try {
-      const response = await this.publicApiClient.get('/sdk/public/account');
-      const account = response.data;
+      const account = await this.publicApiClient.get('/sdk/public/account');
 
       const result: AccountPublic = {
         id: account.id,
@@ -225,8 +221,8 @@ export class Icpay {
     }
 
     try {
-      const response = await this.publicApiClient.get('/sdk/public/ledgers/verified');
-      const ledgers: LedgerPublic[] = response.data.map((ledger: any) => ({
+      const resp = await this.publicApiClient.get('/sdk/public/ledgers/verified');
+      const ledgers: LedgerPublic[] = (resp as any).map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
@@ -295,9 +291,9 @@ export class Icpay {
   async triggerTransactionSync(canisterTransactionId: number): Promise<any> {
     this.emitMethodStart('triggerTransactionSync', { canisterTransactionId });
     try {
-      const response = await this.publicApiClient.get(`/sdk/public/transactions/${canisterTransactionId}/sync`);
-      this.emitMethodSuccess('triggerTransactionSync', response.data);
-      return response.data;
+      const data = await this.publicApiClient.get(`/sdk/public/transactions/${canisterTransactionId}/sync`);
+      this.emitMethodSuccess('triggerTransactionSync', data);
+      return data;
     } catch (error) {
       const err = new IcpayError({
         code: 'TRANSACTION_SYNC_TRIGGER_FAILED',
@@ -560,14 +556,14 @@ export class Icpay {
           });
         }
 
-        const intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
+        const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
           amount: request.amount,
           ledgerCanisterId,
           expectedSenderPrincipal,
           metadata: request.metadata || {},
         });
-        paymentIntentId = intentResp.data?.paymentIntent?.id || null;
-        paymentIntentCode = intentResp.data?.paymentIntent?.intentCode ?? null;
+        paymentIntentId = intentResp?.paymentIntent?.id || null;
+        paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
         debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal });
         // Emit transaction created event
         if (paymentIntentId) {
@@ -705,11 +701,11 @@ export class Icpay {
         for (let attempt = 1; attempt <= maxNotifyAttempts; attempt++) {
           try {
             debugLog(this.config.debug || false, 'notifying API about completion', { attempt, notifyPath, paymentIntentId, canisterTransactionId });
-            const resp = await notifyClient.post(notifyPath, {
+            const resp: any = await notifyClient.post(notifyPath, {
               paymentIntentId,
               canisterTxId: canisterTransactionId,
             });
-            return resp.data;
+            return resp;
           } catch (e: any) {
             const status = e?.response?.status;
             const data = e?.response?.data;
@@ -1204,8 +1200,7 @@ export class Icpay {
   async getLedgerInfo(ledgerCanisterId: string): Promise<SdkLedger> {
     this.emitMethodStart('getLedgerInfo', { ledgerCanisterId });
     try {
-      const response = await this.publicApiClient.get(`/sdk/public/ledgers/${ledgerCanisterId}`);
-      const ledger = response.data;
+      const ledger = await this.publicApiClient.get(`/sdk/public/ledgers/${ledgerCanisterId}`);
 
       const result: SdkLedger = {
         id: ledger.id,
@@ -1286,8 +1281,7 @@ export class Icpay {
     this.emitMethodStart('getAllLedgersWithPrices');
     try {
       const response = await this.publicApiClient.get('/sdk/public/ledgers/all-with-prices');
-
-      const result: SdkLedger[] = response.data.map((ledger: any) => ({
+      const result: SdkLedger[] = (response as any).map((ledger: any) => ({
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
