@@ -1,4 +1,4 @@
-import type { AxiosInstance } from 'axios';
+import type { HttpClient } from './http';
 import { IcpayError } from './errors';
 import type {
   SdkPaymentAggregate,
@@ -37,7 +37,7 @@ export type ProtectedApi = {
 };
 
 export function createProtectedApi(params: {
-  privateApiClient: AxiosInstance | null;
+  privateApiClient: HttpClient | null;
   emitStart: EmitFn;
   emitSuccess: EmitFn;
   emitError: EmitFn;
@@ -63,7 +63,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/payments/${id}`);
         emitSuccess('getPaymentById', { id });
-        return res.data as SdkPaymentAggregate;
+        return res as unknown as SdkPaymentAggregate;
       } catch (error) {
         emitError('getPaymentById', error);
         throw error;
@@ -75,8 +75,8 @@ export function createProtectedApi(params: {
       emitStart('listPayments');
       try {
         const res = await privateApiClient!.get('/sdk/payments');
-        emitSuccess('listPayments', { count: Array.isArray(res.data) ? res.data.length : undefined });
-        return res.data as SdkPaymentAggregate[];
+        emitSuccess('listPayments', { count: Array.isArray(res as any) ? (res as any).length : undefined });
+        return res as unknown as SdkPaymentAggregate[];
       } catch (error) {
         emitError('listPayments', error);
         throw error;
@@ -89,7 +89,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/payment-intents/${id}`);
         emitSuccess('getPaymentIntentById', { id });
-        return res.data as SdkPaymentIntent;
+        return res as unknown as SdkPaymentIntent;
       } catch (error) {
         emitError('getPaymentIntentById', error);
         throw error;
@@ -102,7 +102,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/invoices/${id}`);
         emitSuccess('getInvoiceById', { id });
-        return res.data as SdkInvoice;
+        return res as unknown as SdkInvoice;
       } catch (error) {
         emitError('getInvoiceById', error);
         throw error;
@@ -115,7 +115,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/transactions/${id}`);
         emitSuccess('getTransactionById', { id });
-        return res.data as SdkTransaction;
+        return res as unknown as SdkTransaction;
       } catch (error) {
         emitError('getTransactionById', error);
         throw error;
@@ -128,7 +128,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/wallets/${id}`);
         emitSuccess('getWalletById', { id });
-        return res.data as SdkWallet;
+        return res as unknown as SdkWallet;
       } catch (error) {
         emitError('getWalletById', error);
         throw error;
@@ -140,8 +140,8 @@ export function createProtectedApi(params: {
       emitStart('getVerifiedLedgersPrivate');
       try {
         const res = await privateApiClient!.get('/sdk/ledgers/verified');
-        emitSuccess('getVerifiedLedgersPrivate', { count: Array.isArray(res.data) ? res.data.length : undefined });
-        return res.data as SdkLedger[];
+        emitSuccess('getVerifiedLedgersPrivate', { count: Array.isArray(res as any) ? (res as any).length : undefined });
+        return res as unknown as SdkLedger[];
       } catch (error) {
         emitError('getVerifiedLedgersPrivate', error);
         throw error;
@@ -153,8 +153,8 @@ export function createProtectedApi(params: {
       emitStart('getAllLedgersWithPricesPrivate');
       try {
         const res = await privateApiClient!.get('/sdk/ledgers/all-with-prices');
-        emitSuccess('getAllLedgersWithPricesPrivate', { count: Array.isArray(res.data) ? res.data.length : undefined });
-        return res.data as SdkLedger[];
+        emitSuccess('getAllLedgersWithPricesPrivate', { count: Array.isArray(res as any) ? (res as any).length : undefined });
+        return res as unknown as SdkLedger[];
       } catch (error) {
         emitError('getAllLedgersWithPricesPrivate', error);
         throw error;
@@ -167,7 +167,7 @@ export function createProtectedApi(params: {
       try {
         const res = await privateApiClient!.get(`/sdk/ledgers/${idOrCanisterId}`);
         emitSuccess('getLedgerInfoPrivate', { idOrCanisterId });
-        return res.data as SdkLedger;
+        return res as unknown as SdkLedger;
       } catch (error) {
         emitError('getLedgerInfoPrivate', error);
         throw error;
@@ -191,8 +191,7 @@ export function createProtectedApi(params: {
       requireSecretKey('getDetailedAccountInfo');
       emitStart('getDetailedAccountInfo');
       try {
-        const response = await privateApiClient!.get('/sdk/account');
-        const account = response.data;
+        const account: any = await privateApiClient!.get('/sdk/account');
         const result: AccountInfo = {
           id: account.id,
           name: account.name,
@@ -221,8 +220,7 @@ export function createProtectedApi(params: {
       requireSecretKey('getTransactionStatus');
       emitStart('getTransactionStatus', { canisterTransactionId });
       try {
-        const response = await privateApiClient!.get(`/sdk/transactions/${canisterTransactionId}/status`);
-        const result = response.data;
+        const result: any = await privateApiClient!.get(`/sdk/transactions/${canisterTransactionId}/status`);
         emitSuccess('getTransactionStatus', result);
         return result;
       } catch (error) {
@@ -249,9 +247,9 @@ export function createProtectedApi(params: {
         if (request.limit) params.append('limit', request.limit.toString());
         if (request.offset) params.append('offset', request.offset.toString());
 
-        const response = await privateApiClient!.get(`/sdk/payments/history?${params.toString()}`);
+        const response: any = await privateApiClient!.get(`/sdk/payments/history?${params.toString()}`);
         const result: PaymentHistoryResponse = {
-          payments: response.data.payments.map((tx: any) => ({
+          payments: response.payments.map((tx: any) => ({
             id: tx.id,
             status: tx.status,
             amount: tx.amount,
@@ -267,10 +265,10 @@ export function createProtectedApi(params: {
             createdAt: new Date(tx.createdAt),
             updatedAt: new Date(tx.updatedAt),
           })),
-          total: response.data.total,
-          limit: response.data.limit,
-          offset: response.data.offset,
-          hasMore: response.data.hasMore,
+          total: response.total,
+          limit: response.limit,
+          offset: response.offset,
+          hasMore: response.hasMore,
         } as any;
         emitSuccess('getPaymentHistory', { total: result.total });
         return result;
@@ -294,9 +292,9 @@ export function createProtectedApi(params: {
         if (request.offset) params.append('offset', request.offset.toString());
         if (request.status) params.append('status', request.status);
 
-        const response = await privateApiClient!.get(`/sdk/payments/by-principal/${request.principalId}?${params.toString()}`);
+        const response: any = await privateApiClient!.get(`/sdk/payments/by-principal/${request.principalId}?${params.toString()}`);
         const result: PaymentHistoryResponse = {
-          payments: response.data.payments.map((tx: any) => ({
+          payments: response.payments.map((tx: any) => ({
             id: tx.id,
             status: tx.status,
             amount: tx.amount,
@@ -312,10 +310,10 @@ export function createProtectedApi(params: {
             createdAt: new Date(tx.createdAt),
             updatedAt: new Date(tx.updatedAt),
           })),
-          total: response.data.total,
-          limit: response.data.limit,
-          offset: response.data.offset,
-          hasMore: response.data.hasMore,
+          total: response.total,
+          limit: response.limit,
+          offset: response.offset,
+          hasMore: response.hasMore,
         } as any;
         emitSuccess('getPaymentsByPrincipal', { total: result.total });
         return result;
@@ -334,9 +332,9 @@ export function createProtectedApi(params: {
       requireSecretKey('getAccountWalletBalances');
       emitStart('getAccountWalletBalances');
       try {
-        const response = await privateApiClient!.get('/sdk/account/wallet-balances');
+        const response: any = await privateApiClient!.get('/sdk/account/wallet-balances');
         const result: AllLedgerBalances = {
-          balances: response.data.balances.map((balance: any) => ({
+          balances: response.balances.map((balance: any) => ({
             ledgerId: balance.ledgerId,
             ledgerName: balance.ledgerName,
             ledgerSymbol: balance.ledgerSymbol,
@@ -348,8 +346,8 @@ export function createProtectedApi(params: {
             lastPriceUpdate: balance.lastPriceUpdate ? new Date(balance.lastPriceUpdate) : undefined,
             lastUpdated: new Date(balance.lastUpdated),
           } as LedgerBalance)),
-          totalBalancesUSD: response.data.totalBalancesUSD,
-          lastUpdated: new Date(response.data.lastUpdated),
+          totalBalancesUSD: response.totalBalancesUSD,
+          lastUpdated: new Date(response.lastUpdated),
         };
         emitSuccess('getAccountWalletBalances', { count: result.balances.length, totalUSD: result.totalBalancesUSD });
         return result;
