@@ -317,9 +317,10 @@ export class Icpay {
     try {
       // Use public endpoint to get account info
       const response = await this.publicApiClient.get('/sdk/public/account');
-      this.accountInfoCache = response.data;
-      if (response.data && response.data.icpayCanisterId) {
-        this.icpayCanisterId = response.data.icpayCanisterId.toString();
+      // HttpClient returns parsed body directly (no {data} wrapper)
+      this.accountInfoCache = response as any;
+      if (response && (response as any).icpayCanisterId) {
+        this.icpayCanisterId = (response as any).icpayCanisterId.toString();
       }
       return this.accountInfoCache;
     } catch (error) {
@@ -492,9 +493,27 @@ export class Icpay {
       if (!this.icpayCanisterId) {
         await this.fetchAccountInfo();
       }
+      // Fallback: try public getAccountInfo if still missing
+      if (!this.icpayCanisterId) {
+        try {
+          const acct = await this.getAccountInfo();
+          if ((acct as any)?.icpayCanisterId) {
+            this.icpayCanisterId = (acct as any).icpayCanisterId.toString();
+          }
+        } catch {}
+      }
+      if (!this.icpayCanisterId || typeof this.icpayCanisterId !== 'string') {
+        const err = new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Could not resolve ICPay canister ID from account info',
+          details: { accountInfoCache: this.accountInfoCache }
+        });
+        this.emitMethodError('sendFunds', err);
+        throw err;
+      }
 
       const ledgerCanisterId = request.ledgerCanisterId;
-      let toPrincipal = this.icpayCanisterId!;
+      const toPrincipal = this.icpayCanisterId;
       const amount = typeof request.amount === 'string' ? BigInt(request.amount) : BigInt(request.amount);
       const host = this.icHost;
       let memo: Uint8Array | undefined = undefined;
