@@ -36,6 +36,8 @@ export class Icpay {
   private verifiedLedgersCache: { data: LedgerPublic[] | null; timestamp: number } = { data: null, timestamp: 0 };
   private events: IcpayEventCenter;
   public protected: ProtectedApi;
+  public readonly icpLedgerCanisterId = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+
 
   constructor(config: IcpayConfig) {
     this.config = {
@@ -518,7 +520,77 @@ export class Icpay {
       const host = this.icHost;
       let memo: Uint8Array | undefined = undefined;
 
+      // If onrampPayment is enabled (request or global config), branch to onramp flow
+      const onramp = request.onrampPayment === true || this.config.onrampPayment === true;
+      if (onramp) {
+        // Only ICP ledger is allowed for onramp
+        if (ledgerCanisterId !== this.icpLedgerCanisterId) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+            message: 'Onramp is only supported for ICP ledger',
+            details: { provided: ledgerCanisterId, expected: this.icpLedgerCanisterId },
+          });
+          this.emitError(err);
+          throw err;
+        }
 
+        // Ensure amountUsd is provided or compute it
+        let amountUsd = (request as any).amountUsd as number | string | undefined;
+        if (amountUsd == null) {
+          try {
+            const res = await this.calculateTokenAmountFromUSD({
+              usdAmount: 1, // placeholder to fetch price
+              ledgerCanisterId,
+            });
+            // If price is P = USD per token, then amountUsd = amountTokens * P
+            const price = res.currentPrice;
+            const tokenAmount = typeof request.amount === 'string' ? Number(request.amount) : Number(request.amount);
+            amountUsd = price * (tokenAmount / Math.pow(10, res.decimals));
+          } catch {}
+        }
+
+        // Create payment intent directly (without requiring connected wallet), flagging onrampPayment
+        let paymentIntentId: string | null = null;
+        let paymentIntentCode: number | null = null;
+        try {
+          debugLog(this.config.debug || false, 'creating onramp payment intent');
+          const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
+            amount: request.amount,
+            ledgerCanisterId,
+            // expectedSenderPrincipal omitted in onramp
+            metadata: request.metadata || {},
+            onrampPayment: true,
+            widgetParams: request.widgetParams || {},
+            amountUsd: typeof amountUsd === 'string' ? amountUsd : (amountUsd != null ? amountUsd.toFixed(2) : undefined),
+          });
+          paymentIntentId = intentResp?.paymentIntentId || intentResp?.paymentIntent?.id || null;
+          paymentIntentCode = intentResp?.paymentIntentCode ?? null;
+          const onrampData = intentResp?.onramp || {};
+          // Return minimally required response and attach onramp data for widget init
+          return {
+            transactionId: 0,
+            status: 'pending',
+            amount: request.amount,
+            recipientCanister: this.icpayCanisterId!,
+            timestamp: new Date(),
+            metadata: {
+              paymentIntentId,
+              paymentIntentCode,
+              onramp: onrampData,
+            },
+          } as any;
+        } catch (e) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.API_ERROR,
+            message: 'Failed to create onramp payment intent',
+            details: e,
+            retryable: true,
+            userAction: 'Try again',
+          });
+          this.emitError(err);
+          throw err;
+        }
+      }
 
       // Check balance before sending
       const requiredAmount = amount;
@@ -622,7 +694,7 @@ export class Icpay {
       } catch {}
 
       let transferResult;
-      if (ledgerCanisterId === 'ryjl3-tyaaa-aaaaa-aaaba-cai') {
+      if (ledgerCanisterId === this.icpLedgerCanisterId) {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
         debugLog(this.config.debug || false, 'sending ICRC-1 transfer (ICP)');
         transferResult = await this.sendFundsToLedger(
@@ -1270,9 +1342,12 @@ export class Icpay {
 
       const createTransactionRequest: CreateTransactionRequest = {
         ledgerCanisterId: request.ledgerCanisterId,
+        amountUsd: usdAmount,
         amount: priceCalculationResult.tokenAmountDecimals,
         accountCanisterId: request.accountCanisterId,
-        metadata: request.metadata
+        metadata: request.metadata,
+        onrampPayment: request.onrampPayment,
+        widgetParams: request.widgetParams,
       };
 
       const res = await this.sendFunds(createTransactionRequest);

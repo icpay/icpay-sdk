@@ -33,6 +33,9 @@ export interface IcpayConfig {
    * Defaults to false (do not await; fire-and-forget notify).
    */
   awaitServerNotification?: boolean;
+
+  /** If true, SDK will initiate Onramp flow instead of direct transfer */
+  onrampPayment?: boolean;
 }
 
 export interface ConnectedWallet {
@@ -104,8 +107,11 @@ export interface Transaction {
 export interface CreateTransactionRequest {
   amount: string;
   ledgerCanisterId: string;
-  accountCanisterId?: string; // Optional, will be fetched if not provided
+  accountCanisterId?: string;
   metadata?: Record<string, any>;
+  onrampPayment?: boolean;
+  widgetParams?: Record<string, any>;
+  amountUsd?: number | string;
 }
 
 export interface TransactionResponse {
@@ -531,8 +537,10 @@ export interface LedgerInfo {
 export interface SendFundsUsdRequest {
   usdAmount: string | number;
   ledgerCanisterId: string;
-  accountCanisterId?: string; // Optional, will be fetched if not provided
+  accountCanisterId?: string;
   metadata?: Record<string, any>;
+  onrampPayment?: boolean;
+  widgetParams?: Record<string, any>;
 }
 
 // Payments types
