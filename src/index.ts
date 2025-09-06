@@ -45,7 +45,7 @@ export class Icpay {
       apiUrl: 'https://api.icpay.org',
       debug: false,
       enableEvents: false,
-      awaitServerNotification: false,
+      awaitServerNotification: true,
       ...config
     };
 
