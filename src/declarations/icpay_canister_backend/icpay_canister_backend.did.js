@@ -37,6 +37,7 @@ export const idlFactory = ({ IDL }) => {
     'memo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'notify_processing' : IDL.Bool,
+    'source_type' : IDL.Nat8,
     'timestamp' : IDL.Nat64,
     'index_received' : IDL.Opt(IDL.Nat64),
     'sender_principal_id' : IDL.Text,
@@ -214,6 +215,11 @@ export const idlFactory = ({ IDL }) => {
     'list_accounts' : IDL.Func([], [IDL.Vec(AccountRecord)], ['query']),
     'notify_ledger_transaction' : IDL.Func(
         [LedgerTransactionNotification],
+        [Result_1],
+        [],
+      ),
+    'notify_onramp_icp' : IDL.Func(
+        [IDL.Vec(IDL.Nat8), IDL.Vec(IDL.Nat8)],
         [Result_1],
         [],
       ),

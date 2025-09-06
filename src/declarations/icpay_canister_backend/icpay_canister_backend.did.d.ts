@@ -138,6 +138,7 @@ export interface Transaction {
   'memo' : [] | [Uint8Array | number[]],
   'timestamp_to_account' : [] | [bigint],
   'notify_processing' : boolean,
+  'source_type' : number,
   'timestamp' : bigint,
   'index_received' : [] | [bigint],
   'sender_principal_id' : string,
@@ -203,6 +204,10 @@ export interface _SERVICE {
   'list_accounts' : ActorMethod<[], Array<AccountRecord>>,
   'notify_ledger_transaction' : ActorMethod<
     [LedgerTransactionNotification],
+    Result_1
+  >,
+  'notify_onramp_icp' : ActorMethod<
+    [Uint8Array | number[], Uint8Array | number[]],
     Result_1
   >,
   'remove_account' : ActorMethod<[bigint], Result>,
