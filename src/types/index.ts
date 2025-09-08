@@ -261,7 +261,7 @@ export interface PublicNotifyResponse {
   transactionId: string | null;
 }
 
-export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'canceled' | 'refunded';
+export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'canceled' | 'refunded' | 'mismatched';
 export type PaymentIntentStatus = 'requires_payment' | 'processing' | 'succeeded' | 'completed' | 'failed' | 'canceled';
 export type InvoiceStatus = 'draft' | 'open' | 'paid' | 'void';
 export type RefundStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -317,6 +317,9 @@ export interface PaymentPublic {
   accountCanisterId?: number | null;
   basePaymentAccountId?: string | null;
   status: PaymentStatus;
+  // Enriched fields (if available)
+  requestedAmount?: string | null; // from payment_intent.amount
+  paidAmount?: string | null; // from transaction.amount
   invoiceId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -371,6 +374,8 @@ export interface SdkPayment {
   accountCanisterId?: number | null;
   basePaymentAccountId?: string | null;
   status: PaymentStatus;
+  requestedAmount?: string | null;
+  paidAmount?: string | null;
   invoiceId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;

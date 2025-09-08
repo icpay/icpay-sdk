@@ -4,6 +4,7 @@ export type IcpayEventName =
   | 'icpay-sdk-transaction-updated'
   | 'icpay-sdk-transaction-completed'
   | 'icpay-sdk-transaction-failed'
+  | 'icpay-sdk-transaction-mismatched'
   | 'icpay-sdk-connect-wallet'
   | 'icpay-sdk-method-start'
   | 'icpay-sdk-method-success'
