@@ -784,43 +784,23 @@ export class Icpay {
       // 5) Notify API about completion with intent and transaction id
       // Optionally await based on config.awaitServerNotification
       let publicNotify: any = undefined;
-      const notifyApi = async () => {
-        const notifyClient = this.publicApiClient;
-        const notifyPath = '/sdk/public/payments/notify';
-        const maxNotifyAttempts = 5;
-        const notifyDelayMs = 1000;
-        for (let attempt = 1; attempt <= maxNotifyAttempts; attempt++) {
-          try {
-            debugLog(this.config.debug || false, 'notifying API about completion', { attempt, notifyPath, paymentIntentId, canisterTransactionId });
-            const resp: any = await notifyClient.post(notifyPath, {
-              paymentIntentId,
-              canisterTxId: canisterTransactionId,
-            });
-            return resp;
-          } catch (e: any) {
-            const status = e?.response?.status;
-            const data = e?.response?.data;
-            debugLog(this.config.debug || false, 'API notify attempt failed', { attempt, status, data });
-            // Proactively trigger a transaction sync if we get not found
-            try {
-              await this.triggerTransactionSync(canisterTransactionId);
-            } catch {}
-            if (attempt < maxNotifyAttempts) {
-              await new Promise(r => setTimeout(r, notifyDelayMs));
-            }
-          }
-        }
-        debugLog(this.config.debug || false, 'API notify failed after retries (non-fatal)');
-        return undefined;
-      };
 
       if (this.config.awaitServerNotification) {
-        publicNotify = await notifyApi();
+        publicNotify = await this.performNotifyPaymentIntent({
+          paymentIntentId: paymentIntentId!,
+          canisterTransactionId: canisterTransactionId?.toString(),
+          maxAttempts: 5,
+          delayMs: 1000,
+        });
       } else {
         // fire-and-forget
-        notifyApi()
+        this.performNotifyPaymentIntent({
+          paymentIntentId: paymentIntentId!,
+          canisterTransactionId: canisterTransactionId?.toString(),
+          maxAttempts: 5,
+          delayMs: 1000,
+        })
           .then((data) => {
-            // Optionally emit a success for the async notify step
             this.emitMethodSuccess('sendFunds.notifyApi', { paymentIntentId, canisterTransactionId, data });
           })
           .catch((err) => {
@@ -841,7 +821,16 @@ export class Icpay {
 
       debugLog(this.config.debug || false, 'sendFunds done', response);
       if (statusString === 'completed') {
-        this.emit('icpay-sdk-transaction-completed', response);
+        // If API notify included a payment with mismatched status, treat as mismatched event
+        const requested = (publicNotify as any)?.payment?.requestedAmount || null;
+        const paid = (publicNotify as any)?.payment?.paidAmount || null;
+        const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
+        if (isMismatched) {
+          this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
+          this.emit('icpay-sdk-transaction-failed', { ...response, code: 'MISMATCHED_AMOUNT', message: 'Paid amount differs from requested amount', requestedAmount: requested, paidAmount: paid });
+        } else {
+          this.emit('icpay-sdk-transaction-completed', response);
+        }
       } else if (statusString === 'failed') {
         this.emit('icpay-sdk-transaction-failed', response);
       } else {
@@ -1366,6 +1355,63 @@ export class Icpay {
       this.emitMethodError('sendFundsUsd', err);
       throw err;
     }
+  }
+
+  /**
+   * Continuously notifies the API about a payment intent (no canister tx id) for Onramp.
+   * Uses publishable-key public endpoint. Emits icpay-sdk-transaction-updated only when
+   * status changes, and icpay-sdk-transaction-completed when reaching completed/succeeded.
+   */
+  notifyPaymentIntentOnRamp(params: { paymentIntentId: string; intervalMs?: number; orderId?: string }): { stop: () => void } {
+    const paymentIntentId = params.paymentIntentId;
+    const intervalMs = Math.max(1000, params.intervalMs ?? 5000);
+    const orderId = params.orderId;
+    let timer: any = null;
+    let lastStatus: string | null = null;
+    // Signal progress bar that canister notification/verification phase has effectively started
+    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+    const tick = async () => {
+      const res = await this.performNotifyPaymentIntent({ paymentIntentId, orderId });
+      const status = (res as any)?.payment?.status || '';
+      if (status && status !== lastStatus) {
+        lastStatus = status;
+        if (status === 'completed' || status === 'succeeded') {
+          this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-completed', { detail: { id: paymentIntentId, status } }));
+        } else {
+          this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-updated', { detail: { id: paymentIntentId, status } }));
+        }
+      }
+    };
+    // kick and schedule
+    tick().catch(() => {});
+    timer = setInterval(tick, intervalMs);
+    return { stop: () => { if (timer) { clearInterval(timer); timer = null; } } };
+  }
+
+  /** Reusable notify helper for both ledger flow and onramp */
+  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string }): Promise<any> {
+    const notifyClient = this.publicApiClient;
+    const notifyPath = '/sdk/public/payments/notify';
+    const maxAttempts = params.maxAttempts ?? 1;
+    const delayMs = params.delayMs ?? 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        debugLog(this.config.debug || false, 'notify payment intent', { attempt, notifyPath, paymentIntentId: params.paymentIntentId, canisterTxId: params.canisterTransactionId });
+        const body: any = { paymentIntentId: params.paymentIntentId };
+        if (params.canisterTransactionId) body.canisterTxId = params.canisterTransactionId;
+        if (params.orderId) body.orderId = params.orderId;
+        const resp: any = await notifyClient.post(notifyPath, body);
+        return resp;
+      } catch (e: any) {
+        const status = e?.response?.status;
+        const data = e?.response?.data;
+        debugLog(this.config.debug || false, 'notify payment intent error', { attempt, status, data });
+        if (attempt < maxAttempts && delayMs > 0) {
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      }
+    }
+    return undefined;
   }
 
     /**
