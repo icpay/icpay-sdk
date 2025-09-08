@@ -759,12 +759,25 @@ export class Icpay {
       let publicNotify: any = undefined;
 
       if (this.config.awaitServerNotification) {
+        // Poll API notify until completed or attempts exhausted
         publicNotify = await this.performNotifyPaymentIntent({
           paymentIntentId: paymentIntentId!,
           canisterTransactionId: canisterTransactionId?.toString(),
-          maxAttempts: 5,
+          maxAttempts: 99999,
           delayMs: 1000,
         });
+        // If API responded and exposes a status, prefer it to decide success
+        const apiStatus = (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
+        if (typeof apiStatus === 'string') {
+          const norm = apiStatus.toLowerCase();
+          if (norm === 'completed' || norm === 'succeeded') {
+            statusString = 'completed';
+          } else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
+            statusString = 'failed';
+          } else {
+            statusString = 'pending';
+          }
+        }
       } else {
         // fire-and-forget
         this.performNotifyPaymentIntent({
@@ -1374,7 +1387,22 @@ export class Icpay {
         if (params.canisterTransactionId) body.canisterTxId = params.canisterTransactionId;
         if (params.orderId) body.orderId = params.orderId;
         const resp: any = await notifyClient.post(notifyPath, body);
-        return resp;
+        // If this is the last attempt, return whatever we got
+        if (attempt === maxAttempts) {
+          return resp;
+        }
+        // Otherwise, only return early if completed/succeeded
+        const status = (resp as any)?.payment?.status || (resp as any)?.status || '';
+        if (typeof status === 'string') {
+          const norm = status.toLowerCase();
+          if (norm === 'completed' || norm === 'succeeded') {
+            return resp;
+          }
+        }
+        // Not completed yet; wait and retry
+        if (delayMs > 0) {
+          await new Promise(r => setTimeout(r, delayMs));
+        }
       } catch (e: any) {
         const status = e?.response?.status;
         const data = e?.response?.data;
