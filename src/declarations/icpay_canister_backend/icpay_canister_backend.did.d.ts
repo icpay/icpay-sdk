@@ -116,8 +116,6 @@ export type Result_2 = { 'Ok' : Payout } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_4 = { 'Ok' : string } |
-  { 'Err' : string };
 export interface Split {
   'account_canister_id' : bigint,
   'index_block' : [] | [bigint],
@@ -168,11 +166,6 @@ export type TransactionStatus = { 'Failed' : string } |
   { 'Received' : null } |
   { 'Completed' : null } |
   { 'Pending' : null };
-export interface WithdrawRequest {
-  'recipient' : string,
-  'ledger_canister_id' : string,
-  'amount' : bigint,
-}
 export interface _SERVICE {
   'add_account' : ActorMethod<[bigint, Account], Result>,
   'get_account' : ActorMethod<[bigint], [] | [Account]>,
@@ -218,7 +211,6 @@ export interface _SERVICE {
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
-  'withdraw_funds' : ActorMethod<[WithdrawRequest], Result_4>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];
