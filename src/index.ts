@@ -439,30 +439,6 @@ export class Icpay {
     }
   }
 
-
-  /**
-   * Create a simple memo with account canister ID as bytes
-   * Example: 1 => Uint8Array([1]), 2 => Uint8Array([2])
-   */
-  private createMemoWithAccountCanisterId(accountCanisterId: number): Uint8Array {
-    // Convert number to bytes (simple approach)
-    const bytes = [];
-    let num = accountCanisterId;
-
-    // Handle 0 case
-    if (num === 0) {
-      return new Uint8Array([0]);
-    }
-
-    // Convert to bytes (little-endian)
-    while (num > 0) {
-      bytes.push(num & 0xff);
-      num = Math.floor(num / 256);
-    }
-
-    return new Uint8Array(bytes);
-  }
-
   private createPackedMemo(accountCanisterId: number, intentCode: number): Uint8Array {
     let memo = (BigInt(accountCanisterId >>> 0) << BigInt(32)) | BigInt(intentCode >>> 0);
     if (memo === BigInt(0)) return new Uint8Array([0]);
@@ -685,9 +661,6 @@ export class Icpay {
         if (!isNaN(acctIdNum) && paymentIntentCode != null) {
           memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
           debugLog(this.config.debug || false, 'built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
-        } else if (!isNaN(acctIdNum)) {
-          memo = this.createMemoWithAccountCanisterId(acctIdNum);
-          debugLog(this.config.debug || false, 'built legacy memo', { accountCanisterId: acctIdNum });
         }
 
         debugLog(this.config.debug || false, 'memo', { memo });
