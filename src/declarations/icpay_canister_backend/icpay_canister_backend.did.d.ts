@@ -83,6 +83,7 @@ export interface Payout {
   'to_subaccount' : [] | [Uint8Array | number[]],
   'from_subaccount' : Uint8Array | number[],
   'icp_account_identifier' : [] | [string],
+  'notify_processing' : [] | [boolean],
   'timestamp_created' : bigint,
   'index' : [] | [bigint],
   'ledger_canister_id' : string,
@@ -181,7 +182,6 @@ export interface _SERVICE {
     TransactionResult
   >,
   'get_payout' : ActorMethod<[bigint], [] | [Payout]>,
-  'get_platform_wallet' : ActorMethod<[], string>,
   'get_refund_by_original_tx_id' : ActorMethod<[bigint], [] | [Refund]>,
   'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
   'get_transaction_status_public' : ActorMethod<
@@ -207,8 +207,8 @@ export interface _SERVICE {
   'request_payout' : ActorMethod<[bigint, string, bigint], Result_2>,
   'request_refund' : ActorMethod<[bigint], Result_3>,
   'retry_payout' : ActorMethod<[bigint], Result_2>,
-  'set_controller' : ActorMethod<[Principal], Result>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
+  'test_compute_canister_icp_account_identifier_hex' : ActorMethod<[], string>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
 }
