@@ -72,6 +72,7 @@ export const idlFactory = ({ IDL }) => {
     'to_subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'from_subaccount' : IDL.Vec(IDL.Nat8),
     'icp_account_identifier' : IDL.Opt(IDL.Text),
+    'notify_processing' : IDL.Opt(IDL.Bool),
     'timestamp_created' : IDL.Nat64,
     'index' : IDL.Opt(IDL.Nat64),
     'ledger_canister_id' : IDL.Text,
@@ -183,7 +184,6 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'get_payout' : IDL.Func([IDL.Nat], [IDL.Opt(Payout)], ['query']),
-    'get_platform_wallet' : IDL.Func([], [IDL.Text], ['query']),
     'get_refund_by_original_tx_id' : IDL.Func(
         [IDL.Nat],
         [IDL.Opt(Refund)],
@@ -203,7 +203,7 @@ export const idlFactory = ({ IDL }) => {
     'icrc21_canister_call_consent_message' : IDL.Func(
         [Icrc21ConsentMessageRequest],
         [Icrc21ConsentMessageResponse],
-        [],
+        ['query'],
       ),
     'initialize_controllers' : IDL.Func([], [Result], []),
     'list_accounts' : IDL.Func([], [IDL.Vec(AccountRecord)], ['query']),
@@ -221,8 +221,12 @@ export const idlFactory = ({ IDL }) => {
     'request_payout' : IDL.Func([IDL.Nat64, IDL.Text, IDL.Nat], [Result_2], []),
     'request_refund' : IDL.Func([IDL.Nat], [Result_3], []),
     'retry_payout' : IDL.Func([IDL.Nat], [Result_2], []),
-    'set_controller' : IDL.Func([IDL.Principal], [Result], []),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
+    'test_compute_canister_icp_account_identifier_hex' : IDL.Func(
+        [],
+        [IDL.Text],
+        ['query'],
+      ),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'update_controllers' : IDL.Func([], [Result], []),
   });
