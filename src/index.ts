@@ -458,6 +458,20 @@ export class Icpay {
     this.emitMethodStart('sendFunds', { request: { ...request, amount: typeof request.amount === 'string' ? request.amount : String(request.amount) } });
     try {
       debugLog(this.config.debug || false, 'sendFunds start', { request });
+      // Resolve ledgerCanisterId from symbol if needed
+      let ledgerCanisterId = request.ledgerCanisterId;
+      if (!ledgerCanisterId && (request as any).symbol) {
+        ledgerCanisterId = await this.getLedgerCanisterIdBySymbol((request as any).symbol as string);
+      }
+      if (!ledgerCanisterId) {
+        const err = new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Either ledgerCanisterId or symbol must be provided',
+          details: { request }
+        });
+        this.emitMethodError('sendFunds', err);
+        throw err;
+      }
       // Fetch account info to get accountCanisterId if not provided
       let accountCanisterId = request.accountCanisterId;
       if (!accountCanisterId) {
@@ -490,9 +504,7 @@ export class Icpay {
         throw err;
       }
 
-      const ledgerCanisterId = request.ledgerCanisterId;
       const toPrincipal = this.icpayCanisterId;
-      const amount = typeof request.amount === 'string' ? BigInt(request.amount) : BigInt(request.amount);
       const host = this.icHost;
       let memo: Uint8Array | undefined = undefined;
 
@@ -532,6 +544,7 @@ export class Icpay {
           debugLog(this.config.debug || false, 'creating onramp payment intent');
           const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
             amount: request.amount,
+            symbol: (request as any).symbol,
             ledgerCanisterId,
             // expectedSenderPrincipal omitted in onramp
             metadata: request.metadata || {},
@@ -568,8 +581,22 @@ export class Icpay {
         }
       }
 
+      // Pre-flight: compute required amount for balance check before creating intent to avoid dangling intents
+      let preAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
+      if (!preAmountStr && (request as any).amountUsd != null) {
+        try {
+          const calc = await this.calculateTokenAmountFromUSD({ usdAmount: Number((request as any).amountUsd), ledgerCanisterId });
+          preAmountStr = calc.tokenAmountDecimals;
+        } catch {}
+      }
+      if (!preAmountStr) {
+        const err = new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Either amount or amountUsd must be provided' });
+        this.emitError(err);
+        throw err;
+      }
+
       // Check balance before sending
-      const requiredAmount = amount;
+      const requiredAmount = BigInt(preAmountStr);
       debugLog(this.config.debug || false, 'checking balance', { ledgerCanisterId, requiredAmount: requiredAmount.toString() });
 
       // Helper function to make amounts human-readable
@@ -605,9 +632,10 @@ export class Icpay {
           });
         }
 
-      // 1) Create payment intent via API
+      // 1) Create payment intent via API (backend will finalize amount/price)
       let paymentIntentId: string | null = null;
       let paymentIntentCode: number | null = null;
+      let resolvedAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
       try {
         debugLog(this.config.debug || false, 'creating payment intent');
 
@@ -625,25 +653,27 @@ export class Icpay {
 
         const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
           amount: request.amount,
+          symbol: (request as any).symbol,
           ledgerCanisterId,
           expectedSenderPrincipal,
           metadata: request.metadata || {},
+          amountUsd: (request as any).amountUsd,
         });
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
-        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal });
+        resolvedAmountStr = intentResp?.paymentIntent?.amount || resolvedAmountStr;
+        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal, resolvedAmountStr });
         // Emit transaction created event
         if (paymentIntentId) {
           this.emit('icpay-sdk-transaction-created', {
             paymentIntentId,
-            amount: request.amount,
+            amount: resolvedAmountStr,
             ledgerCanisterId,
             expectedSenderPrincipal
           });
         }
       } catch (e) {
         // Do not proceed without a payment intent
-        // Throw a standardized error so integrators can handle it consistently
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.API_ERROR,
           message: 'Failed to create payment intent. Please try again.',
@@ -654,6 +684,17 @@ export class Icpay {
         this.emitError(err);
         throw err;
       }
+
+      if (!resolvedAmountStr) {
+        const err = new IcpayError({
+          code: ICPAY_ERROR_CODES.API_ERROR,
+          message: 'Payment intent did not return amount',
+        });
+        this.emitError(err);
+        throw err;
+      }
+
+      const amount = BigInt(resolvedAmountStr);
 
       // Build packed memo if possible
       try {
@@ -1310,20 +1351,30 @@ export class Icpay {
       // Convert usdAmount to number if it's a string
       const usdAmount = typeof request.usdAmount === 'string' ? parseFloat(request.usdAmount) : request.usdAmount;
 
-      const priceCalculationResult = await this.calculateTokenAmountFromUSD({
-        usdAmount: usdAmount,
-        ledgerCanisterId: request.ledgerCanisterId
-      });
+      // Resolve ledgerCanisterId from symbol if needed
+      let ledgerCanisterId = request.ledgerCanisterId;
+      if (!ledgerCanisterId && (request as any).symbol) {
+        ledgerCanisterId = await this.getLedgerCanisterIdBySymbol((request as any).symbol as string);
+      }
+      if (!ledgerCanisterId) {
+        const err = new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Either ledgerCanisterId or symbol must be provided',
+          details: { request }
+        });
+        this.emitMethodError('sendFundsUsd', err);
+        throw err;
+      }
 
       const createTransactionRequest: CreateTransactionRequest = {
-        ledgerCanisterId: request.ledgerCanisterId,
+        ledgerCanisterId,
+        symbol: (request as any).symbol,
         amountUsd: usdAmount,
-        amount: priceCalculationResult.tokenAmountDecimals,
         accountCanisterId: request.accountCanisterId,
         metadata: request.metadata,
         onrampPayment: request.onrampPayment,
         widgetParams: request.widgetParams,
-      };
+      } as any;
 
       const res = await this.sendFunds(createTransactionRequest);
       this.emitMethodSuccess('sendFundsUsd', res);
