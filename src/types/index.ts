@@ -105,8 +105,9 @@ export interface Transaction {
 }
 
 export interface CreateTransactionRequest {
-  amount: string;
-  ledgerCanisterId: string;
+  amount?: string;
+  ledgerCanisterId?: string;
+  symbol?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
@@ -541,7 +542,8 @@ export interface LedgerInfo {
 
 export interface SendFundsUsdRequest {
   usdAmount: string | number;
-  ledgerCanisterId: string;
+  ledgerCanisterId?: string;
+  symbol?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
