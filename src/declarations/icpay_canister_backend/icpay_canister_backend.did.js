@@ -176,13 +176,7 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'get_canister_info' : IDL.Func([], [CanisterMetrics], ['query']),
-    'get_controller' : IDL.Func([], [IDL.Principal], ['query']),
     'get_controllers' : IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
-    'get_ledger_transactions' : IDL.Func(
-        [IDL.Text, IDL.Opt(IDL.Nat32), IDL.Opt(IDL.Nat32)],
-        [TransactionResult],
-        ['query'],
-      ),
     'get_payout' : IDL.Func([IDL.Nat], [IDL.Opt(Payout)], ['query']),
     'get_refund_by_original_tx_id' : IDL.Func(
         [IDL.Nat],
