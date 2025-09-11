@@ -222,11 +222,6 @@ export const idlFactory = ({ IDL }) => {
     'request_refund' : IDL.Func([IDL.Nat], [Result_3], []),
     'retry_payout' : IDL.Func([IDL.Nat], [Result_2], []),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
-    'test_compute_canister_icp_account_identifier_hex' : IDL.Func(
-        [],
-        [IDL.Text],
-        ['query'],
-      ),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'update_controllers' : IDL.Func([], [Result], []),
   });
