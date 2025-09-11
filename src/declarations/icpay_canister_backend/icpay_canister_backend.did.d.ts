@@ -175,12 +175,7 @@ export interface _SERVICE {
     TransactionResult
   >,
   'get_canister_info' : ActorMethod<[], CanisterMetrics>,
-  'get_controller' : ActorMethod<[], Principal>,
   'get_controllers' : ActorMethod<[], Array<Principal>>,
-  'get_ledger_transactions' : ActorMethod<
-    [string, [] | [number], [] | [number]],
-    TransactionResult
-  >,
   'get_payout' : ActorMethod<[bigint], [] | [Payout]>,
   'get_refund_by_original_tx_id' : ActorMethod<[bigint], [] | [Refund]>,
   'get_transaction' : ActorMethod<[bigint], [] | [Transaction]>,
