@@ -208,7 +208,6 @@ export interface _SERVICE {
   'request_refund' : ActorMethod<[bigint], Result_3>,
   'retry_payout' : ActorMethod<[bigint], Result_2>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
-  'test_compute_canister_icp_account_identifier_hex' : ActorMethod<[], string>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
 }
