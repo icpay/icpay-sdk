@@ -854,7 +854,8 @@ export class Icpay {
         const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
         if (isMismatched) {
           this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
-          this.emit('icpay-sdk-transaction-failed', { ...response, code: 'MISMATCHED_AMOUNT', message: 'Paid amount differs from requested amount', requestedAmount: requested, paidAmount: paid });
+          // Also emit updated so UIs listening for progress can advance
+          this.emit('icpay-sdk-transaction-updated', { ...response, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
         } else {
           this.emit('icpay-sdk-transaction-completed', response);
         }
@@ -1409,11 +1410,15 @@ export class Icpay {
     try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
     const tick = async () => {
       const res = await this.performNotifyPaymentIntent({ paymentIntentId, orderId });
-      const status = (res as any)?.payment?.status || '';
+      const status = ((res as any)?.payment?.status || '').toLowerCase();
       if (status && status !== lastStatus) {
         lastStatus = status;
         if (status === 'completed' || status === 'succeeded') {
           this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-completed', { detail: { id: paymentIntentId, status } }));
+        } else if (status === 'mismatched') {
+          this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-mismatched', { detail: { id: paymentIntentId, status, payment: (res as any)?.payment } }));
+          // Also emit updated to ensure progress bar advances to terminal state
+          this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-updated', { detail: { id: paymentIntentId, status } }));
         } else {
           this.dispatchEvent(new CustomEvent('icpay-sdk-transaction-updated', { detail: { id: paymentIntentId, status } }));
         }
