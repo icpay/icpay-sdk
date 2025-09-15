@@ -45,7 +45,8 @@ export class Icpay {
       apiUrl: 'https://api.icpay.org',
       debug: false,
       enableEvents: true,
-      ...config
+      ...config,
+      onrampDisabled: true,
     };
 
     debugLog(this.config.debug || false, 'constructor', { config: this.config });
@@ -508,7 +509,7 @@ export class Icpay {
       let memo: Uint8Array | undefined = undefined;
 
       // If onrampPayment is enabled (request or global config), branch to onramp flow
-      const onramp = request.onrampPayment === true || this.config.onrampPayment === true;
+      const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
       if (onramp) {
         // Only ICP ledger is allowed for onramp
         if (ledgerCanisterId !== this.icpLedgerCanisterId) {
