@@ -31,6 +31,9 @@ export interface IcpayConfig {
 
   /** If true, SDK will initiate Onramp flow instead of direct transfer */
   onrampPayment?: boolean;
+
+  /** Temporary kill switch: when true, disables Transak onramp regardless of request */
+  onrampDisabled?: boolean;
 }
 
 export interface ConnectedWallet {
