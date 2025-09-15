@@ -28,11 +28,6 @@ export interface IcpayConfig {
    */
   enableEvents?: boolean;
 
-  /**
-   * If true, wait for server notification result in sendFunds.
-   * Defaults to false (do not await; fire-and-forget notify).
-   */
-  awaitServerNotification?: boolean;
 
   /** If true, SDK will initiate Onramp flow instead of direct transfer */
   onrampPayment?: boolean;
