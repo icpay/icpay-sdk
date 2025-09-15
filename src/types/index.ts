@@ -538,7 +538,7 @@ export interface LedgerInfo {
   lastPriceUpdate?: Date;
 }
 
-export interface SendFundsUsdRequest {
+export interface CreatePaymentUsdRequest {
   usdAmount: string | number;
   ledgerCanisterId?: string;
   symbol?: string;

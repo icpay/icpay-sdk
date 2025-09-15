@@ -7,7 +7,7 @@ import {
   LedgerBalance,
   PriceCalculationRequest,
   PriceCalculationResult,
-  SendFundsUsdRequest,
+  CreatePaymentUsdRequest,
   AccountPublic,
   LedgerPublic,
   SdkLedger,
@@ -451,13 +451,13 @@ export class Icpay {
   }
 
   /**
-   * Send funds to a specific canister/ledger (public method)
+   * Create a payment to a specific canister/ledger (public method)
    * This is now a real transaction
    */
-  async sendFunds(request: CreateTransactionRequest): Promise<TransactionResponse> {
-    this.emitMethodStart('sendFunds', { request: { ...request, amount: typeof request.amount === 'string' ? request.amount : String(request.amount) } });
+  async createPayment(request: CreateTransactionRequest): Promise<TransactionResponse> {
+    this.emitMethodStart('createPayment', { request: { ...request, amount: typeof request.amount === 'string' ? request.amount : String(request.amount) } });
     try {
-      debugLog(this.config.debug || false, 'sendFunds start', { request });
+      debugLog(this.config.debug || false, 'createPayment start', { request });
       // Resolve ledgerCanisterId from symbol if needed
       let ledgerCanisterId = request.ledgerCanisterId;
       if (!ledgerCanisterId && (request as any).symbol) {
@@ -469,7 +469,7 @@ export class Icpay {
           message: 'Either ledgerCanisterId or symbol must be provided',
           details: { request }
         });
-        this.emitMethodError('sendFunds', err);
+        this.emitMethodError('createPayment', err);
         throw err;
       }
       // Fetch account info to get accountCanisterId if not provided
@@ -500,7 +500,7 @@ export class Icpay {
           message: 'Could not resolve ICPay canister ID from account info',
           details: { accountInfoCache: this.accountInfoCache }
         });
-        this.emitMethodError('sendFunds', err);
+        this.emitMethodError('createPayment', err);
         throw err;
       }
 
@@ -829,7 +829,7 @@ export class Icpay {
         payment: publicNotify
       };
 
-      debugLog(this.config.debug || false, 'sendFunds done', response);
+      debugLog(this.config.debug || false, 'createPayment done', response);
       if (statusString === 'completed') {
         // If API notify included a payment with mismatched status, treat as mismatched event
         const requested = (publicNotify as any)?.payment?.requestedAmount || null;
@@ -847,19 +847,19 @@ export class Icpay {
       } else {
         this.emit('icpay-sdk-transaction-updated', response);
       }
-      this.emitMethodSuccess('sendFunds', response);
+      this.emitMethodSuccess('createPayment', response);
       return response;
     } catch (error) {
       if (error instanceof IcpayError) {
-        this.emitMethodError('sendFunds', error);
+        this.emitMethodError('createPayment', error);
         throw error;
       }
       const err = new IcpayError({
         code: 'TRANSACTION_FAILED',
-        message: 'Failed to send funds',
+        message: 'Failed to create payment',
         details: error
       });
-      this.emitMethodError('sendFunds', err);
+      this.emitMethodError('createPayment', err);
       throw err;
     }
   }
@@ -1327,10 +1327,10 @@ export class Icpay {
   }
 
   /**
-   * Send funds from USD to a specific ledger (public method)
+   * Create a payment from a USD amount to a specific ledger (public method)
    */
-  async sendFundsUsd(request: SendFundsUsdRequest): Promise<TransactionResponse> {
-    this.emitMethodStart('sendFundsUsd', { request });
+  async createPaymentUsd(request: CreatePaymentUsdRequest): Promise<TransactionResponse> {
+    this.emitMethodStart('createPaymentUsd', { request });
     try {
       // Convert usdAmount to number if it's a string
       const usdAmount = typeof request.usdAmount === 'string' ? parseFloat(request.usdAmount) : request.usdAmount;
@@ -1346,7 +1346,7 @@ export class Icpay {
           message: 'Either ledgerCanisterId or symbol must be provided',
           details: { request }
         });
-        this.emitMethodError('sendFundsUsd', err);
+        this.emitMethodError('createPaymentUsd', err);
         throw err;
       }
 
@@ -1360,12 +1360,12 @@ export class Icpay {
         widgetParams: request.widgetParams,
       } as any;
 
-      const res = await this.sendFunds(createTransactionRequest);
-      this.emitMethodSuccess('sendFundsUsd', res);
+      const res = await this.createPayment(createTransactionRequest);
+      this.emitMethodSuccess('createPaymentUsd', res);
       return res;
     } catch (error) {
       if (error instanceof IcpayError) {
-        this.emitMethodError('sendFundsUsd', error);
+        this.emitMethodError('createPaymentUsd', error);
         throw error;
       }
       const err = new IcpayError({
@@ -1373,7 +1373,7 @@ export class Icpay {
         message: 'Failed to send funds from USD',
         details: error
       });
-      this.emitMethodError('sendFundsUsd', err);
+      this.emitMethodError('createPaymentUsd', err);
       throw err;
     }
   }
