@@ -45,7 +45,6 @@ export class Icpay {
       apiUrl: 'https://api.icpay.org',
       debug: false,
       enableEvents: true,
-      awaitServerNotification: false,
       ...config
     };
 
@@ -796,43 +795,26 @@ export class Icpay {
       }
 
       // 5) Notify API about completion with intent and transaction id
-      // Optionally await based on config.awaitServerNotification
       let publicNotify: any = undefined;
 
-      if (this.config.awaitServerNotification) {
-        // Poll API notify until completed or attempts exhausted
-        publicNotify = await this.performNotifyPaymentIntent({
-          paymentIntentId: paymentIntentId!,
-          canisterTransactionId: canisterTransactionId?.toString(),
-          maxAttempts: 99999,
-          delayMs: 1000,
-        });
-        // If API responded and exposes a status, prefer it to decide success
-        const apiStatus = (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
-        if (typeof apiStatus === 'string') {
-          const norm = apiStatus.toLowerCase();
-          if (norm === 'completed' || norm === 'succeeded') {
-            statusString = 'completed';
-          } else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
-            statusString = 'failed';
-          } else {
-            statusString = 'pending';
-          }
+      // Always await server notification until intent is terminal
+      publicNotify = await this.performNotifyPaymentIntent({
+        paymentIntentId: paymentIntentId!,
+        canisterTransactionId: canisterTransactionId?.toString(),
+        maxAttempts: 99999,
+        delayMs: 1000,
+      });
+      // If API responded and exposes a status, prefer it to decide success
+      const apiStatus = (publicNotify as any)?.paymentIntent?.status || (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
+      if (typeof apiStatus === 'string') {
+        const norm = apiStatus.toLowerCase();
+        if (norm === 'completed' || norm === 'succeeded') {
+          statusString = 'completed';
+        } else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
+          statusString = 'failed';
+        } else {
+          statusString = 'pending';
         }
-      } else {
-        // fire-and-forget
-        this.performNotifyPaymentIntent({
-          paymentIntentId: paymentIntentId!,
-          canisterTransactionId: canisterTransactionId?.toString(),
-          maxAttempts: 5,
-          delayMs: 1000,
-        })
-          .then((data) => {
-            this.emitMethodSuccess('sendFunds.notifyApi', { paymentIntentId, canisterTransactionId, data });
-          })
-          .catch((err) => {
-            this.emitMethodError('sendFunds.notifyApi', err);
-          });
       }
 
       const response = {
