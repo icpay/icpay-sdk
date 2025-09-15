@@ -44,8 +44,8 @@ export class Icpay {
       environment: 'production',
       apiUrl: 'https://api.icpay.org',
       debug: false,
-      enableEvents: false,
-      awaitServerNotification: true,
+      enableEvents: true,
+      awaitServerNotification: false,
       ...config
     };
 
@@ -1410,7 +1410,9 @@ export class Icpay {
     try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
     const tick = async () => {
       const res = await this.performNotifyPaymentIntent({ paymentIntentId, orderId });
-      const status = ((res as any)?.payment?.status || '').toLowerCase();
+      const piStatus = ((res as any)?.paymentIntent?.status || '').toLowerCase();
+      const payStatus = ((res as any)?.payment?.status || '').toLowerCase();
+      const status = piStatus || payStatus || '';
       if (status && status !== lastStatus) {
         lastStatus = status;
         if (status === 'completed' || status === 'succeeded') {
@@ -1447,8 +1449,8 @@ export class Icpay {
         if (attempt === maxAttempts) {
           return resp;
         }
-        // Otherwise, only return early if completed/succeeded
-        const status = (resp as any)?.payment?.status || (resp as any)?.status || '';
+        // Otherwise, only return early if completed/succeeded based on intent or payment
+        const status = (resp as any)?.paymentIntent?.status || (resp as any)?.payment?.status || (resp as any)?.status || '';
         if (typeof status === 'string') {
           const norm = status.toLowerCase();
           if (norm === 'completed' || norm === 'succeeded') {
@@ -1468,7 +1470,7 @@ export class Icpay {
         }
       }
     }
-    return undefined;
+    return {};
   }
 
     /**
