@@ -421,18 +421,33 @@ export class Icpay {
       const principalObj = Principal.fromText(principal);
 
       // Create anonymous actor for balance queries (no signing required)
-      const agent = new HttpAgent({ host: this.icHost });
-      const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
-
-      // Get the balance of the user's account
-      const result = await (actor as any).icrc1_balance_of({
-        owner: principalObj,
-        subaccount: []
-      });
-
-      const out = BigInt(result);
-      this.emitMethodSuccess('getLedgerBalance', { ledgerCanisterId, balance: out.toString() });
-      return out;
+      // Retry on transient certificate TrustError (clock skew) a few times
+      const maxAttempts = 3;
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const agent = new HttpAgent({ host: this.icHost });
+          const actor = Actor.createActor(ledgerIdl, { agent, canisterId: ledgerCanisterId });
+          // Get the balance of the user's account
+          const result = await (actor as any).icrc1_balance_of({
+            owner: principalObj,
+            subaccount: []
+          });
+          const out = BigInt(result);
+          this.emitMethodSuccess('getLedgerBalance', { ledgerCanisterId, balance: out.toString() });
+          return out;
+        } catch (e: any) {
+          lastErr = e;
+          const msg = String(e?.message || '').toLowerCase();
+          const isCertSkew = msg.includes('certificate is signed more than') || msg.includes('trusterror');
+          if (attempt < maxAttempts && isCertSkew) {
+            await new Promise(r => setTimeout(r, attempt * 500));
+            continue;
+          }
+          throw e;
+        }
+      }
+      throw lastErr || new Error('Failed to fetch ledger balance');
     } catch (error) {
       this.emitMethodError('getLedgerBalance', error);
       throw error;
@@ -697,18 +712,16 @@ export class Icpay {
       const amount = BigInt(resolvedAmountStr);
 
       // Build packed memo if possible
-      try {
-        const acctIdNum = parseInt(accountCanisterId);
-        if (!isNaN(acctIdNum) && paymentIntentCode != null) {
-          memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
-          debugLog(this.config.debug || false, 'built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
-        }
+      const acctIdNum = parseInt(accountCanisterId);
+      if (!isNaN(acctIdNum) && paymentIntentCode != null) {
+        memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
+        debugLog(this.config.debug || false, 'built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
+      }
 
-        debugLog(this.config.debug || false, 'memo', { memo });
-      } catch {}
+      debugLog(this.config.debug || false, 'memo', { memo });
 
       let transferResult;
-      if (ledgerCanisterId === this.icpLedgerCanisterId) {
+      try {
         // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
         debugLog(this.config.debug || false, 'sending ICRC-1 transfer (ICP)');
         transferResult = await this.sendFundsToLedger(
@@ -718,25 +731,68 @@ export class Icpay {
           memo,
           host
         );
-      } else {
-        // ICRC-1 ledgers: use principal directly
-        debugLog(this.config.debug || false, 'sending ICRC-1 transfer');
-        transferResult = await this.sendFundsToLedger(
-          ledgerCanisterId,
-          toPrincipal,
-          amount,
-          memo,
-          host
-        );
+      } catch (transferError: any) {
+        // Some wallets/networks return a timeout or transient 5xx even when the transfer was accepted.
+        // Treat these as processing and continue with intent notification so users don't double-send.
+        const msg = String(transferError?.message || '');
+        const lower = msg.toLowerCase();
+        const isTimeout = lower.includes('request timed out');
+        const isProcessing = isTimeout && lower.includes('processing');
+        // DFINITY HTTP agent transient error when subnet has no healthy nodes (e.g., during upgrade)
+        const isNoHealthyNodes = lower.includes('no_healthy_nodes') || lower.includes('service unavailable') || lower.includes('503');
+        if (isTimeout || isProcessing || isNoHealthyNodes) {
+          debugLog(this.config.debug || false, 'transfer timed out, proceeding with intent notification', { message: msg });
+          // Long-poll the public notify endpoint using only the intent id (no canister tx id available)
+          const publicNotify = await this.performNotifyPaymentIntent({
+            paymentIntentId: paymentIntentId!,
+            maxAttempts: 120,
+            delayMs: 1000,
+          });
+          // Derive status from API response
+          let statusString: 'pending' | 'completed' | 'failed' = 'pending';
+          const apiStatus = (publicNotify as any)?.paymentIntent?.status || (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
+          if (typeof apiStatus === 'string') {
+            const norm = apiStatus.toLowerCase();
+            if (norm === 'completed' || norm === 'succeeded') statusString = 'completed';
+            else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') statusString = 'failed';
+          }
+          const response = {
+            transactionId: 0,
+            status: statusString,
+            amount: amount.toString(),
+            recipientCanister: ledgerCanisterId,
+            timestamp: new Date(),
+            description: 'Fund transfer',
+            metadata: request.metadata,
+            payment: publicNotify,
+          } as any;
+          if (statusString === 'completed') {
+            const requested = (publicNotify as any)?.payment?.requestedAmount || null;
+            const paid = (publicNotify as any)?.payment?.paidAmount || null;
+            const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
+            if (isMismatched) {
+              this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
+              this.emit('icpay-sdk-transaction-updated', { ...response, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
+            } else {
+              this.emit('icpay-sdk-transaction-completed', response);
+            }
+          } else if (statusString === 'failed') {
+            this.emit('icpay-sdk-transaction-failed', response);
+          } else {
+            this.emit('icpay-sdk-transaction-updated', response);
+          }
+          this.emitMethodSuccess('createPayment', response);
+          return response;
+        }
+        throw transferError;
       }
 
       // Assume transferResult returns a block index or transaction id
       const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
       debugLog(this.config.debug || false, 'transfer result', { blockIndex });
 
-      // First, notify the canister about the ledger transaction
+      // First, notify the canister about the ledger transaction (best-effort)
       let canisterTransactionId: number;
-      let notifyStatus: any = null;
       try {
         debugLog(this.config.debug || false, 'notifying canister about ledger tx');
         const notifyRes: any = await this.notifyLedgerTransaction(
@@ -744,12 +800,10 @@ export class Icpay {
           ledgerCanisterId,
           BigInt(blockIndex)
         );
-        // notify returns { id, status, amount }
         if (typeof notifyRes === 'string') {
           canisterTransactionId = parseInt(notifyRes, 10);
         } else {
           canisterTransactionId = parseInt(notifyRes.id, 10);
-          notifyStatus = notifyRes;
         }
         debugLog(this.config.debug || false, 'canister notified', { canisterTransactionId });
       } catch (notifyError) {
@@ -757,98 +811,16 @@ export class Icpay {
         debugLog(this.config.debug || false, 'notify failed, using blockIndex as tx id', { canisterTransactionId });
       }
 
-      // Poll for transaction status until completed
-      // Use the transaction ID returned by the notification, not the block index
-      let status: any = null;
-      if (notifyStatus && notifyStatus.status) {
-        status = { status: notifyStatus.status };
-      } else {
-        try {
-          debugLog(this.config.debug || false, 'polling transaction status (public)', { canisterTransactionId });
-          status = await this.pollTransactionStatus(this.icpayCanisterId!, canisterTransactionId, accountCanisterId as string, Number(blockIndex), 2000, 30);
-          debugLog(this.config.debug || false, 'poll done', { status });
-        } catch (e) {
-          status = { status: 'pending' };
-          debugLog(this.config.debug || false, 'poll failed, falling back to pending');
-        }
-      }
-
-      // Extract the status string from the transaction object
-      let statusString: 'pending' | 'completed' | 'failed' = 'pending';
-      if (status) {
-        if (typeof status === 'object' && status.status) {
-          // Handle variant status like {Completed: null}
-          if (typeof status.status === 'object') {
-            const statusKeys = Object.keys(status.status);
-            if (statusKeys.length > 0) {
-              const rawStatus = statusKeys[0].toLowerCase();
-              if (rawStatus === 'completed' || rawStatus === 'failed') {
-                statusString = rawStatus as 'completed' | 'failed';
-              }
-            }
-          } else {
-            const rawStatus = status.status;
-            if (rawStatus === 'completed' || rawStatus === 'failed') {
-              statusString = rawStatus as 'completed' | 'failed';
-            }
-          }
-        }
-      }
-
-      // 5) Notify API about completion with intent and transaction id
-      let publicNotify: any = undefined;
-
-      // Always await server notification until intent is terminal
-      publicNotify = await this.performNotifyPaymentIntent({
+      // Durable wait until API returns terminal status (completed/mismatched/failed/canceled)
+      const finalResponse = await this.awaitIntentTerminal({
         paymentIntentId: paymentIntentId!,
         canisterTransactionId: canisterTransactionId?.toString(),
-        maxAttempts: 99999,
-        delayMs: 1000,
-      });
-      // If API responded and exposes a status, prefer it to decide success
-      const apiStatus = (publicNotify as any)?.paymentIntent?.status || (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
-      if (typeof apiStatus === 'string') {
-        const norm = apiStatus.toLowerCase();
-        if (norm === 'completed' || norm === 'succeeded') {
-          statusString = 'completed';
-        } else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
-          statusString = 'failed';
-        } else {
-          statusString = 'pending';
-        }
-      }
-
-      const response = {
-        transactionId: canisterTransactionId,
-        status: statusString,
+        ledgerCanisterId,
         amount: amount.toString(),
-        recipientCanister: ledgerCanisterId,
-        timestamp: new Date(),
-        description: 'Fund transfer',
         metadata: request.metadata,
-        payment: publicNotify
-      };
-
-      debugLog(this.config.debug || false, 'createPayment done', response);
-      if (statusString === 'completed') {
-        // If API notify included a payment with mismatched status, treat as mismatched event
-        const requested = (publicNotify as any)?.payment?.requestedAmount || null;
-        const paid = (publicNotify as any)?.payment?.paidAmount || null;
-        const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
-        if (isMismatched) {
-          this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
-          // Also emit updated so UIs listening for progress can advance
-          this.emit('icpay-sdk-transaction-updated', { ...response, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
-        } else {
-          this.emit('icpay-sdk-transaction-completed', response);
-        }
-      } else if (statusString === 'failed') {
-        this.emit('icpay-sdk-transaction-failed', response);
-      } else {
-        this.emit('icpay-sdk-transaction-updated', response);
-      }
-      this.emitMethodSuccess('createPayment', response);
-      return response;
+      });
+      this.emitMethodSuccess('createPayment', finalResponse);
+      return finalResponse;
     } catch (error) {
       if (error instanceof IcpayError) {
         this.emitMethodError('createPayment', error);
@@ -981,13 +953,28 @@ export class Icpay {
   async notifyLedgerTransaction(canisterId: string, ledgerCanisterId: string, blockIndex: bigint): Promise<string> {
     this.emitMethodStart('notifyLedgerTransaction', { canisterId, ledgerCanisterId, blockIndex: blockIndex.toString() });
     // Create anonymous actor for canister notifications (no signature required)
-    const agent = new HttpAgent({ host: this.icHost });
-    const actor = Actor.createActor(icpayIdl, { agent, canisterId });
-
-    const result = await actor.notify_ledger_transaction({
-      ledger_canister_id: ledgerCanisterId,
-      block_index: blockIndex
-    }) as any;
+    // Retry on transient certificate TrustError (clock skew)
+    const maxAttempts = 3;
+    let result: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const agent = new HttpAgent({ host: this.icHost });
+        const actor = Actor.createActor(icpayIdl, { agent, canisterId });
+        result = await (actor as any).notify_ledger_transaction({
+          ledger_canister_id: ledgerCanisterId,
+          block_index: blockIndex
+        });
+        break;
+      } catch (e: any) {
+        const msg = String(e?.message || '').toLowerCase();
+        const isCertSkew = msg.includes('certificate is signed more than') || msg.includes('trusterror');
+        if (attempt < maxAttempts && isCertSkew) {
+          await new Promise(r => setTimeout(r, attempt * 500));
+          continue;
+        }
+        throw e;
+      }
+    }
 
     if (result && result.Ok) {
       this.emitMethodSuccess('notifyLedgerTransaction', { result: result.Ok });
@@ -1005,14 +992,29 @@ export class Icpay {
 
   async getTransactionStatusPublic(canisterId: string, canisterTransactionId: number, indexReceived: number, accountCanisterId: string): Promise<any> {
     this.emitMethodStart('getTransactionStatusPublic', { canisterId, canisterTransactionId, indexReceived, accountCanisterId });
-    const agent = new HttpAgent({ host: this.icHost });
-    const actor = Actor.createActor(icpayIdl, { agent, canisterId });
     const acctIdNum = parseInt(accountCanisterId);
-    const res = await (actor as any).get_transaction_status_public(
-      acctIdNum,
-      BigInt(canisterTransactionId),
-      [indexReceived]
-    );
+    const maxAttempts = 3;
+    let res: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const agent = new HttpAgent({ host: this.icHost });
+        const actor = Actor.createActor(icpayIdl, { agent, canisterId });
+        res = await (actor as any).get_transaction_status_public(
+          acctIdNum,
+          BigInt(canisterTransactionId),
+          [indexReceived]
+        );
+        break;
+      } catch (e: any) {
+        const msg = String(e?.message || '').toLowerCase();
+        const isCertSkew = msg.includes('certificate is signed more than') || msg.includes('trusterror');
+        if (attempt < maxAttempts && isCertSkew) {
+          await new Promise(r => setTimeout(r, attempt * 500));
+          continue;
+        }
+        return null;
+      }
+    }
     const result = res || { status: 'pending' };
     this.emitMethodSuccess('getTransactionStatusPublic', result);
     return result;
@@ -1454,6 +1456,70 @@ export class Icpay {
       }
     }
     return {};
+  }
+
+  // Waits until the API reports a terminal status for the intent/payment.
+  // Retries indefinitely by default, backing off modestly, and only returns
+  // when status is terminal. Never throws after funds are sent unless API reports
+  // an explicit failure state.
+  private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; ledgerCanisterId: string; amount: string; metadata?: any }): Promise<any> {
+    const baseDelay = 1000;
+    const maxDelay = 10000;
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        const resp = await this.performNotifyPaymentIntent({
+          paymentIntentId: params.paymentIntentId,
+          canisterTransactionId: params.canisterTransactionId,
+          maxAttempts: 1,
+          delayMs: 0,
+        });
+        const status = (resp as any)?.paymentIntent?.status || (resp as any)?.payment?.status || (resp as any)?.status || '';
+        const norm = typeof status === 'string' ? status.toLowerCase() : '';
+        // Terminal statuses
+        if (norm === 'completed' || norm === 'succeeded' || norm === 'mismatched') {
+          const out = {
+            transactionId: Number(params.canisterTransactionId || 0),
+            status: norm === 'succeeded' ? 'completed' : (norm as any),
+            amount: params.amount,
+            recipientCanister: params.ledgerCanisterId,
+            timestamp: new Date(),
+            description: 'Fund transfer',
+            metadata: params.metadata,
+            payment: resp,
+          };
+          if (norm === 'mismatched') {
+            const requested = (resp as any)?.payment?.requestedAmount || null;
+            const paid = (resp as any)?.payment?.paidAmount || null;
+            this.emit('icpay-sdk-transaction-mismatched', { ...out, requestedAmount: requested, paidAmount: paid });
+            this.emit('icpay-sdk-transaction-updated', { ...out, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
+          } else {
+            this.emit('icpay-sdk-transaction-completed', out);
+          }
+          return out;
+        }
+        if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
+          const out = {
+            transactionId: Number(params.canisterTransactionId || 0),
+            status: 'failed',
+            amount: params.amount,
+            recipientCanister: params.ledgerCanisterId,
+            timestamp: new Date(),
+            description: 'Fund transfer',
+            metadata: params.metadata,
+            payment: resp,
+          };
+          this.emit('icpay-sdk-transaction-failed', out);
+          return out;
+        }
+        // Not terminal yet; sleep with backoff and retry
+      } catch (e) {
+        // Network/API error; keep retrying
+      }
+      const delay = Math.min(maxDelay, baseDelay * Math.ceil(attempt / 5));
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
 
     /**
