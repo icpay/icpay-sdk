@@ -199,9 +199,8 @@ export interface _SERVICE {
     Result_1
   >,
   'remove_account' : ActorMethod<[bigint], Result>,
-  'request_payout' : ActorMethod<[bigint, string, bigint], Result_2>,
+  'request_payout' : ActorMethod<[bigint, bigint, string, bigint], Result_2>,
   'request_refund' : ActorMethod<[bigint], Result_3>,
-  'retry_payout' : ActorMethod<[bigint], Result_2>,
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
