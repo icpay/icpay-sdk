@@ -13,6 +13,7 @@ import type {
   PaymentHistoryRequest,
   PaymentHistoryResponse,
   GetPaymentsByPrincipalRequest,
+  GetPaymentsByMetadataRequest,
   AllLedgerBalances,
   LedgerBalance,
 } from './types';
@@ -33,6 +34,7 @@ export type ProtectedApi = {
   getTransactionStatus(canisterTransactionId: number): Promise<TransactionStatus>;
   getPaymentHistory(request?: PaymentHistoryRequest): Promise<PaymentHistoryResponse>;
   getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse>;
+  getPaymentsByMetadata(request: GetPaymentsByMetadataRequest): Promise<PaymentHistoryResponse>;
   getAccountWalletBalances(): Promise<AllLedgerBalances>;
 };
 
@@ -324,6 +326,53 @@ export function createProtectedApi(params: {
           details: error,
         });
         emitError('getPaymentsByPrincipal', err);
+        throw err;
+      }
+    },
+
+    async getPaymentsByMetadata(request: GetPaymentsByMetadataRequest): Promise<PaymentHistoryResponse> {
+      requireSecretKey('getPaymentsByMetadata');
+      emitStart('getPaymentsByMetadata', { request });
+      try {
+        const params = new URLSearchParams();
+        if (request.limit) params.append('limit', request.limit.toString());
+        if (request.offset) params.append('offset', request.offset.toString());
+        if (request.status) params.append('status', request.status);
+
+        const response: any = await privateApiClient!.post(`/sdk/payments/by-metadata?${params.toString()}`, {
+          metadata: request.metadata || {},
+        });
+        const result: PaymentHistoryResponse = {
+          payments: (response?.payments || response || []).map((tx: any) => ({
+            id: tx.id,
+            status: tx.status,
+            amount: tx.amount,
+            ledgerCanisterId: tx.ledgerCanisterId,
+            ledgerSymbol: tx.ledgerSymbol,
+            fromAddress: tx.fromAddress,
+            toAddress: tx.toAddress,
+            fee: tx.fee,
+            decimals: tx.decimals,
+            tokenPrice: tx.tokenPrice,
+            expectedSenderPrincipal: tx.expectedSenderPrincipal,
+            metadata: tx.metadata,
+            createdAt: new Date(tx.createdAt),
+            updatedAt: new Date(tx.updatedAt),
+          })),
+          total: response.total ?? (Array.isArray(response) ? response.length : 0),
+          limit: request.limit ?? response.limit ?? 0,
+          offset: request.offset ?? response.offset ?? 0,
+          hasMore: response.hasMore ?? false,
+        } as any;
+        emitSuccess('getPaymentsByMetadata', { total: result.total });
+        return result;
+      } catch (error) {
+        const err = new IcpayError({
+          code: 'PAYMENTS_BY_METADATA_FETCH_FAILED',
+          message: 'Failed to fetch payments by metadata',
+          details: error,
+        });
+        emitError('getPaymentsByMetadata', err);
         throw err;
       }
     },

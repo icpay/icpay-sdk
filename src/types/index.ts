@@ -525,6 +525,13 @@ export interface GetPaymentsByPrincipalRequest {
   status?: 'pending' | 'completed' | 'failed';
 }
 
+export interface GetPaymentsByMetadataRequest {
+  metadata: Record<string, unknown>;
+  limit?: number;
+  offset?: number;
+  status?: 'pending' | 'completed' | 'failed';
+}
+
 export interface LedgerInfo {
   id: string;
   name: string;
