@@ -343,22 +343,28 @@ export function createProtectedApi(params: {
           metadata: request.metadata || {},
         });
         const result: PaymentHistoryResponse = {
-          payments: (response?.payments || response || []).map((tx: any) => ({
-            id: tx.id,
-            status: tx.status,
-            amount: tx.amount,
-            ledgerCanisterId: tx.ledgerCanisterId,
-            ledgerSymbol: tx.ledgerSymbol,
-            fromAddress: tx.fromAddress,
-            toAddress: tx.toAddress,
-            fee: tx.fee,
-            decimals: tx.decimals,
-            tokenPrice: tx.tokenPrice,
-            expectedSenderPrincipal: tx.expectedSenderPrincipal,
-            metadata: tx.metadata,
-            createdAt: new Date(tx.createdAt),
-            updatedAt: new Date(tx.updatedAt),
-          })),
+          payments: (response?.payments || response || []).map((row: any) => {
+            // Support both legacy flat items and new aggregate shape { payment, intent, ... }
+            const p = row && typeof row === 'object' && row.payment ? row.payment : row;
+            const intent = row && typeof row === 'object' && row.intent ? row.intent : null;
+            return {
+              id: p.id,
+              status: p.status,
+              amount: p.amount,
+              paymentIntentAmountUsd: intent?.amountUsd,
+              ledgerCanisterId: p.ledgerCanisterId,
+              ledgerSymbol: p.ledgerSymbol,
+              fromAddress: p.fromAddress,
+              toAddress: p.toAddress,
+              fee: p.fee,
+              decimals: p.decimals,
+              tokenPrice: p.tokenPrice,
+              expectedSenderPrincipal: intent?.expectedSenderPrincipal ?? p.expectedSenderPrincipal,
+              metadata: p.metadata,
+              createdAt: new Date(p.createdAt),
+              updatedAt: new Date(p.updatedAt),
+            } as any;
+          }),
           total: response.total ?? (Array.isArray(response) ? response.length : 0),
           limit: request.limit ?? response.limit ?? 0,
           offset: request.offset ?? response.offset ?? 0,
