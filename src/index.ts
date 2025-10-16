@@ -740,7 +740,9 @@ export class Icpay {
         const isProcessing = isTimeout && lower.includes('processing');
         // DFINITY HTTP agent transient error when subnet has no healthy nodes (e.g., during upgrade)
         const isNoHealthyNodes = lower.includes('no_healthy_nodes') || lower.includes('service unavailable') || lower.includes('503');
-        if (isTimeout || isProcessing || isNoHealthyNodes) {
+        // Plug inpage transport sometimes throws readState errors after a signed call even though the tx went through
+        const isPlugReadState = lower.includes('read state request') || lower.includes('readstate') || lower.includes('response could not be found');
+        if (isTimeout || isProcessing || isNoHealthyNodes || isPlugReadState) {
           debugLog(this.config.debug || false, 'transfer timed out, proceeding with intent notification', { message: msg });
           // Long-poll the public notify endpoint using only the intent id (no canister tx id available)
           const publicNotify = await this.performNotifyPaymentIntent({
