@@ -56,7 +56,7 @@ export class Icpay {
       throw new Error('Either publishableKey or secretKey must be provided');
     }
 
-    this.icHost = config.icHost || 'https://icp0.io';
+    this.icHost = config.icHost || 'https://icp-api.io';
     this.connectedWallet = config.connectedWallet || null;
     this.actorProvider = config.actorProvider;
     debugLog(this.config.debug || false, 'constructor', { connectedWallet: this.connectedWallet, actorProvider: this.actorProvider });
