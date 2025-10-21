@@ -16,6 +16,10 @@ export interface AccountRecord {
   'account_canister_id' : bigint,
   'account' : Account,
 }
+export interface AllowedLedgerInfo {
+  'canister_id' : string,
+  'standard' : LedgerStandard,
+}
 export interface CanisterMetrics {
   'total_accounts' : number,
   'cycles_balance' : bigint,
@@ -65,6 +69,9 @@ export type Icrc21Error = {
   { 'ConsentMessageUnavailable' : Icrc21ErrorInfo };
 export interface Icrc21ErrorInfo { 'description' : string }
 export interface Icrc21Page { 'lines' : Array<string> }
+export type LedgerStandard = { 'Ck' : null } |
+  { 'Icp' : null } |
+  { 'Icrc' : null };
 export interface LedgerTransactionNotification {
   'block_index' : bigint,
   'ledger_canister_id' : string,
@@ -169,6 +176,7 @@ export type TransactionStatus = { 'Failed' : string } |
   { 'Pending' : null };
 export interface _SERVICE {
   'add_account' : ActorMethod<[bigint, Account], Result>,
+  'add_allowed_ledger' : ActorMethod<[string, LedgerStandard], Result>,
   'get_account' : ActorMethod<[bigint], [] | [Account]>,
   'get_account_transactions' : ActorMethod<
     [bigint, [] | [number], [] | [number]],
@@ -190,6 +198,7 @@ export interface _SERVICE {
   >,
   'initialize_controllers' : ActorMethod<[], Result>,
   'list_accounts' : ActorMethod<[], Array<AccountRecord>>,
+  'list_allowed_ledgers' : ActorMethod<[], Array<AllowedLedgerInfo>>,
   'notify_ledger_transaction' : ActorMethod<
     [LedgerTransactionNotification],
     Result_1
@@ -199,6 +208,7 @@ export interface _SERVICE {
     Result_1
   >,
   'remove_account' : ActorMethod<[bigint], Result>,
+  'remove_allowed_ledger' : ActorMethod<[string], Result>,
   'request_payout' : ActorMethod<[bigint, bigint, string, bigint], Result_2>,
   'request_refund' : ActorMethod<[bigint], Result_3>,
   'set_platform_wallet' : ActorMethod<[string], Result>,

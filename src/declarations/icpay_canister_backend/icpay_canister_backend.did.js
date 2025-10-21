@@ -14,6 +14,11 @@ export const idlFactory = ({ IDL }) => {
     'splits' : IDL.Vec(SplitRule),
   });
   const Result = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
+  const LedgerStandard = IDL.Variant({
+    'Ck' : IDL.Null,
+    'Icp' : IDL.Null,
+    'Icrc' : IDL.Null,
+  });
   const TransactionStatus = IDL.Variant({
     'Failed' : IDL.Text,
     'Processed' : IDL.Null,
@@ -155,6 +160,10 @@ export const idlFactory = ({ IDL }) => {
     'account_canister_id' : IDL.Nat64,
     'account' : Account,
   });
+  const AllowedLedgerInfo = IDL.Record({
+    'canister_id' : IDL.Text,
+    'standard' : LedgerStandard,
+  });
   const LedgerTransactionNotification = IDL.Record({
     'block_index' : IDL.Nat64,
     'ledger_canister_id' : IDL.Text,
@@ -169,6 +178,7 @@ export const idlFactory = ({ IDL }) => {
   const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
   return IDL.Service({
     'add_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
+    'add_allowed_ledger' : IDL.Func([IDL.Text, LedgerStandard], [Result], []),
     'get_account' : IDL.Func([IDL.Nat64], [IDL.Opt(Account)], ['query']),
     'get_account_transactions' : IDL.Func(
         [IDL.Nat64, IDL.Opt(IDL.Nat32), IDL.Opt(IDL.Nat32)],
@@ -201,6 +211,11 @@ export const idlFactory = ({ IDL }) => {
       ),
     'initialize_controllers' : IDL.Func([], [Result], []),
     'list_accounts' : IDL.Func([], [IDL.Vec(AccountRecord)], ['query']),
+    'list_allowed_ledgers' : IDL.Func(
+        [],
+        [IDL.Vec(AllowedLedgerInfo)],
+        ['query'],
+      ),
     'notify_ledger_transaction' : IDL.Func(
         [LedgerTransactionNotification],
         [Result_1],
@@ -212,6 +227,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'remove_account' : IDL.Func([IDL.Nat64], [Result], []),
+    'remove_allowed_ledger' : IDL.Func([IDL.Text], [Result], []),
     'request_payout' : IDL.Func(
         [IDL.Nat, IDL.Nat64, IDL.Text, IDL.Nat],
         [Result_2],
