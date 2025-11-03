@@ -111,6 +111,7 @@ export interface CreateTransactionRequest {
   onrampPayment?: boolean;
   widgetParams?: Record<string, any>;
   amountUsd?: number | string;
+  chainId?: string;
 }
 
 export interface TransactionResponse {

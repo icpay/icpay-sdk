@@ -673,6 +673,7 @@ export class Icpay {
           expectedSenderPrincipal,
           metadata: request.metadata || {},
           amountUsd: (request as any).amountUsd,
+          chainId: (request as any).chainId,
         });
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
