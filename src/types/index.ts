@@ -181,6 +181,14 @@ export interface LedgerBalance {
   currentPrice?: number; // USD price if available
   lastPriceUpdate?: Date;
   lastUpdated: Date;
+  requiredAmount?: string; // Required amount in smallest unit, if provided via amountUsd/amount
+  requiredAmountFormatted?: string; // Human readable required amount
+  hasSufficientBalance?: boolean; // Whether wallet balance >= required amount
+  // Chain metadata (when available for multichain balances)
+  chainId?: string;            // e.g. '84532'
+  chainName?: string | null;   // e.g. 'Base Sepolia'
+  rpcUrlPublic?: string | null;
+  chainUuid?: string | null;   // backend chain UUID
 }
 
 export interface AllLedgerBalances {
@@ -295,13 +303,29 @@ export interface LedgerPublic {
   id: string;
   name: string;
   symbol: string;
+  shortcode?: string | null;
   canisterId: string;
+  chainId?: string; // backend chain UUID
   decimals: number;
   logoUrl: string | null;
   verified: boolean;
   fee: string | null;
   currentPrice: number | null;
   lastPriceUpdate: string | null;
+}
+
+export interface ChainPublic {
+  id: string;
+  chainType: string;
+  chainName: string;
+  chainId: string; // real chain id (string/number as string)
+  shortcode: string | null;
+  contractAddress: string | null;
+  enabled: boolean;
+  rpcUrlPublic: string | null;
+  explorerUrl: string | null;
+  nativeSymbol: string | null;
+  confirmationsRequired: number;
 }
 
 export interface PaymentPublic {
@@ -330,6 +354,8 @@ export interface SdkLedger {
   id: string;
   name: string;
   symbol: string;
+  chainId?: string; // backend chain UUID
+  shortcode?: string | null;
   canisterId: string;
   standard: LedgerStandard;
   decimals: number;

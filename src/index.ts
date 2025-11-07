@@ -34,6 +34,7 @@ export class Icpay {
   private icpayCanisterId: string | null = null;
   private accountInfoCache: any = null;
   private verifiedLedgersCache: { data: LedgerPublic[] | null; timestamp: number } = { data: null, timestamp: 0 };
+  private chainsCache: { data: import('./types').ChainPublic[] | null; timestamp: number } = { data: null, timestamp: 0 };
   private events: IcpayEventCenter;
   public protected: ProtectedApi;
   public readonly icpLedgerCanisterId = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -228,7 +229,9 @@ export class Icpay {
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
+        shortcode: ledger.shortcode ?? null,
         canisterId: ledger.canisterId,
+        chainId: ledger.chainId,
         decimals: ledger.decimals,
         logoUrl: ledger.logoUrl,
         verified: ledger.verified,
@@ -252,6 +255,48 @@ export class Icpay {
         details: error
       });
       this.emitMethodError('getVerifiedLedgers', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Get enabled chains (public method)
+   */
+  async getChains(): Promise<import('./types').ChainPublic[]> {
+    this.emitMethodStart('getChains');
+    const now = Date.now();
+    const cacheAge = 60 * 60 * 1000; // 60 minutes cache
+
+    if (this.chainsCache.data && (now - this.chainsCache.timestamp) < cacheAge) {
+      return this.chainsCache.data;
+    }
+
+    try {
+      const resp = await this.publicApiClient.get('/sdk/public/chains');
+      const chains: import('./types').ChainPublic[] = (resp as any).map((c: any) => ({
+        id: c.id,
+        chainType: c.chainType,
+        chainName: c.chainName,
+        chainId: c.chainId,
+        shortcode: c.shortcode ?? null,
+        contractAddress: c.contractAddress ?? null,
+        enabled: !!c.enabled,
+        rpcUrlPublic: c.rpcUrlPublic ?? null,
+        explorerUrl: c.explorerUrl ?? null,
+        nativeSymbol: c.nativeSymbol ?? null,
+        confirmationsRequired: typeof c.confirmationsRequired === 'number' ? c.confirmationsRequired : parseInt(String(c.confirmationsRequired || 0), 10) || 0,
+      }));
+
+      this.chainsCache = { data: chains, timestamp: now };
+      this.emitMethodSuccess('getChains', { count: chains.length });
+      return chains;
+    } catch (error) {
+      const err = new IcpayError({
+        code: ICPAY_ERROR_CODES.API_ERROR,
+        message: 'Failed to fetch chains',
+        details: error,
+      });
+      this.emitMethodError('getChains', err);
       throw err;
     }
   }
@@ -335,6 +380,397 @@ export class Icpay {
   }
 
 
+
+  public async processPaymentByChain(params: {
+    chainType?: string;
+    chainId?: string | number; // UUID for IC/intent
+    ledgerCanisterId?: string;
+    toPrincipal?: string;
+    amount: bigint;
+    memo?: Uint8Array;
+    host?: string;
+    paymentIntentId: string;
+    request: CreateTransactionRequest;
+    resolvedAmountStr?: string;
+    metadata?: any;
+    onrampData?: any;
+    contractAddress?: string;
+    accountCanisterId?: string;
+    rpcUrlPublic?: string | null;
+    chainName?: string | null;
+    rpcChainId?: string | number | null; // EVM numeric chain id
+    paymentIntentCode?: number | null;
+  }): Promise<TransactionResponse> {
+    const normalized = (params.chainType || '').toLowerCase();
+    switch (normalized) {
+      case 'ic':
+      case 'icp':
+      case 'internet-computer':
+        return await this.processICPayment(params);
+      case 'evm':
+      case 'ethereum':
+        return await this.processEvmPayment(params);
+      case 'solana':
+        throw new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Solana payments are not implemented yet',
+          details: { chainType: params.chainType, chainId: params.chainId }
+        });
+      case 'sui':
+        throw new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Sui payments are not implemented yet',
+          details: { chainType: params.chainType, chainId: params.chainId }
+        });
+      case 'onramp':
+        return {
+          transactionId: 0,
+          status: 'pending',
+          amount: params.resolvedAmountStr || params.amount.toString(),
+          recipientCanister: params.ledgerCanisterId!,
+          timestamp: new Date(),
+          metadata: { paymentIntentId: params.paymentIntentId, onramp: params.onrampData || true },
+        } as any;
+      default:
+        throw new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Unknown or missing chain type for payment processing',
+          details: { chainType: params.chainType, chainId: params.chainId }
+        });
+    }
+  }
+
+  // Public helper: build EVM bytes32 id from accountId and intentCode
+  // Layout matches PaymentProcessor.packId(accountId, appId):
+  // high 8 bytes = uint64(accountId) big-endian; low 24 bytes = bytes24 with intentCode in the lowest 4 bytes (big-endian)
+  public packEvmId(accountCanisterId: number | string, intentCode: number | string): string {
+    const accountIdNum = BigInt(accountCanisterId as any);
+    const intentCodeNum = BigInt(intentCode as any);
+    const out = new Uint8Array(32);
+    // high 8 bytes (big-endian) accountId
+    for (let i = 0; i < 8; i++) {
+      out[i] = Number((accountIdNum >> BigInt(8 * (7 - i))) & 0xffn);
+    }
+    // next 20 bytes are zero
+    // last 4 bytes = intentCode big-endian
+    out[28] = Number((intentCodeNum >> 24n) & 0xffn);
+    out[29] = Number((intentCodeNum >> 16n) & 0xffn);
+    out[30] = Number((intentCodeNum >> 8n) & 0xffn);
+    out[31] = Number(intentCodeNum & 0xffn);
+    const bytesToHex = (u: Uint8Array): string => Array.from(u).map(b => b.toString(16).padStart(2, '0')).join('');
+    return bytesToHex(out);
+  }
+
+  private async processICPayment(params: {
+    ledgerCanisterId?: string;
+    amount: bigint;
+    memo?: Uint8Array;
+    paymentIntentId: string;
+    request: CreateTransactionRequest;
+    metadata?: any;
+    contractAddress?: string | null;
+  }): Promise<TransactionResponse> {
+    const { ledgerCanisterId, amount, memo, paymentIntentId, request, metadata } = params;
+
+    // Prefer contractAddress from intent (for IC, this is the canister id)
+    let toPrincipal = (params.contractAddress && typeof params.contractAddress === 'string') ? params.contractAddress : undefined;
+    const host = this.icHost;
+    if (!toPrincipal) {
+      if (!this.icpayCanisterId) {
+        await this.fetchAccountInfo();
+      }
+      if (!this.icpayCanisterId) {
+        try {
+          const acct = await this.getAccountInfo();
+          if ((acct as any)?.icpayCanisterId) {
+            this.icpayCanisterId = (acct as any).icpayCanisterId.toString();
+          }
+        } catch {}
+      }
+      if (!this.icpayCanisterId || typeof this.icpayCanisterId !== 'string') {
+        const err = new IcpayError({
+          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+          message: 'Could not resolve ICPay canister ID from account info',
+          details: { accountInfoCache: this.accountInfoCache }
+        });
+        this.emitMethodError('createPayment', err);
+        throw err;
+      }
+      toPrincipal = this.icpayCanisterId;
+    }
+
+    let transferResult;
+    try {
+      // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
+      debugLog(this.config.debug || false, 'sending ICRC-1 transfer (ICP)');
+      transferResult = await this.sendFundsToLedger(
+        ledgerCanisterId!,
+        toPrincipal!,
+        amount,
+        memo,
+        host
+      );
+    } catch (transferError: any) {
+      // Some wallets/networks return a timeout or transient 5xx even when the transfer was accepted.
+      // Treat these as processing and continue with intent notification so users don't double-send.
+      const msg = String(transferError?.message || '');
+      const lower = msg.toLowerCase();
+      const isTimeout = lower.includes('request timed out');
+      const isProcessing = isTimeout && lower.includes('processing');
+      // DFINITY HTTP agent transient error when subnet has no healthy nodes (e.g., during upgrade)
+      const isNoHealthyNodes = lower.includes('no_healthy_nodes') || lower.includes('service unavailable') || lower.includes('503');
+      // Plug inpage transport sometimes throws readState errors after a signed call even though the tx went through
+      const isPlugReadState = lower.includes('read state request') || lower.includes('readstate') || lower.includes('response could not be found');
+      if (isTimeout || isProcessing || isNoHealthyNodes || isPlugReadState) {
+        debugLog(this.config.debug || false, 'transfer timed out, proceeding with intent notification', { message: msg });
+        // Long-poll the public notify endpoint using only the intent id (no canister tx id available)
+        const publicNotify = await this.performNotifyPaymentIntent({
+          paymentIntentId: paymentIntentId!,
+          maxAttempts: 120,
+          delayMs: 1000,
+        });
+        // Derive status from API response
+        let statusString: 'pending' | 'completed' | 'failed' = 'pending';
+        const apiStatus = (publicNotify as any)?.paymentIntent?.status || (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
+        if (typeof apiStatus === 'string') {
+          const norm = apiStatus.toLowerCase();
+          if (norm === 'completed' || norm === 'succeeded') statusString = 'completed';
+          else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') statusString = 'failed';
+        }
+        const response = {
+          transactionId: 0,
+          status: statusString,
+          amount: amount.toString(),
+          recipientCanister: ledgerCanisterId,
+          timestamp: new Date(),
+          description: 'Fund transfer',
+          metadata: request.metadata,
+          payment: publicNotify,
+        } as any;
+        if (statusString === 'completed') {
+          const requested = (publicNotify as any)?.payment?.requestedAmount || null;
+          const paid = (publicNotify as any)?.payment?.paidAmount || null;
+          const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
+          if (isMismatched) {
+            this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
+            this.emit('icpay-sdk-transaction-updated', { ...response, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
+          } else {
+            this.emit('icpay-sdk-transaction-completed', response);
+          }
+        } else if (statusString === 'failed') {
+          this.emit('icpay-sdk-transaction-failed', response);
+        } else {
+          this.emit('icpay-sdk-transaction-updated', response);
+        }
+        return response;
+      }
+      throw transferError;
+    }
+
+    // Assume transferResult returns a block index or transaction id
+    const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
+    debugLog(this.config.debug || false, 'transfer result', { blockIndex });
+
+    // First, notify the canister about the ledger transaction (best-effort)
+    let canisterTransactionId: number;
+    try {
+      debugLog(this.config.debug || false, 'notifying canister about ledger tx');
+      const notifyRes: any = await this.notifyLedgerTransaction(
+        this.icpayCanisterId!,
+        ledgerCanisterId!,
+        BigInt(blockIndex)
+      );
+      if (typeof notifyRes === 'string') {
+        canisterTransactionId = parseInt(notifyRes, 10);
+      } else {
+        canisterTransactionId = parseInt(notifyRes.id, 10);
+      }
+      debugLog(this.config.debug || false, 'canister notified', { canisterTransactionId });
+    } catch (notifyError) {
+      canisterTransactionId = parseInt(blockIndex, 10);
+      debugLog(this.config.debug || false, 'notify failed, using blockIndex as tx id', { canisterTransactionId });
+    }
+
+    // Durable wait until API returns terminal status (completed/mismatched/failed/canceled)
+    const finalResponse = await this.awaitIntentTerminal({
+      paymentIntentId: paymentIntentId!,
+      canisterTransactionId: canisterTransactionId?.toString(),
+      ledgerCanisterId: ledgerCanisterId!,
+      amount: amount.toString(),
+      metadata: metadata ?? request.metadata,
+    });
+    return finalResponse;
+  }
+
+  private async processEvmPayment(params: {
+    chainId?: string | number; // intent UUID
+    ledgerCanisterId?: string;
+    contractAddress?: string | null;
+    accountCanisterId?: string;
+    amount: bigint;
+    memo?: Uint8Array;
+    paymentIntentId: string;
+    request: CreateTransactionRequest;
+    metadata?: any;
+    rpcUrlPublic?: string | null;
+    chainName?: string | null;
+    rpcChainId?: string | number | null;
+    paymentIntentCode?: number | null;
+  }): Promise<TransactionResponse> {
+    const contractAddress = params.contractAddress;
+    if (!contractAddress) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'Missing EVM contract address in payment intent',
+      });
+    }
+    const eth = (globalThis as any)?.ethereum || (typeof window !== 'undefined' ? (window as any).ethereum : null);
+    if (!eth || !eth.request) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE,
+        message: 'EVM provider not available (window.ethereum)',
+      });
+    }
+
+    // Ensure correct chain if provided
+    try {
+      const desiredChain = params.rpcChainId ?? null;
+      if (desiredChain != null) {
+        const currentHex: string = await eth.request({ method: 'eth_chainId' });
+        const currentDec = parseInt(currentHex, 16);
+        const desiredDec = typeof desiredChain === 'string' && String(desiredChain).startsWith('0x') ? parseInt(String(desiredChain), 16) : parseInt(String(desiredChain), 10);
+        if (Number.isFinite(desiredDec) && currentDec !== desiredDec) {
+          const hex = '0x' + desiredDec.toString(16);
+          try {
+            await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] });
+          } catch (e: any) {
+            // best-effort add & switch if we have chainName/rpcUrlPublic
+            const rpcUrls: string[] = (params.rpcUrlPublic ? [String(params.rpcUrlPublic)] : []).filter(Boolean) as string[];
+            const chainName = String(params.chainName || `Network ${desiredDec}`);
+            if (rpcUrls.length > 0) {
+              try {
+                await eth.request({
+                  method: 'wallet_addEthereumChain',
+                  params: [{ chainId: hex, chainName, rpcUrls }],
+                });
+              } catch (e2: any) {
+                throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Wrong EVM network. Switch wallet to the correct chain.' });
+              }
+            } else {
+              throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Wrong EVM network. Switch wallet to the correct chain.' });
+            }
+          }
+        }
+      }
+    } catch {}
+
+    const tokenAddress: string | null = params.ledgerCanisterId || null;
+    const isNative = !tokenAddress || /^0x0{40}$/i.test(String(tokenAddress));
+    const amountHex = '0x' + params.amount.toString(16);
+
+    // ABI encoding helpers
+    const toUint64 = (n: bigint): string => n.toString(16).padStart(64, '0');
+    const toAddressPadded = (addr: string): string => addr.replace(/^0x/i, '').padStart(64, '0');
+    const toUint256 = (n: bigint): string => n.toString(16).padStart(64, '0');
+    // Prefer selectors from API; otherwise fallback to constants provided by backend
+    const apiSelectors = (params.request as any).__functionSelectors || {};
+    const selector = {
+      payNative: apiSelectors.payNative || '0x320ca36d',
+      payERC20: apiSelectors.payERC20 || '0x1d8be466',
+    } as const;
+    // Build EVM id bytes32 using shared helper
+    const accountIdNum = BigInt(params.accountCanisterId || 0);
+    const idHex = this.packEvmId(String(accountIdNum), Number(params.paymentIntentCode ?? 0));
+
+    // Debug: summarize EVM call parameters
+    try {
+      debugLog(this.config.debug || false, 'evm params', {
+        chainId: params.chainId,
+        contractAddress,
+        tokenAddress,
+        isNative,
+        amount: params.amount?.toString?.(),
+        amountHex,
+        accountCanisterId: params.accountCanisterId,
+        memoLen: params.memo?.length,
+        idHexLen: idHex?.length,
+        selectorPayNative: selector.payNative,
+        selectorPayERC20: selector.payERC20,
+      });
+    } catch {}
+
+    // Helper to poll receipt until mined or timeout
+    const waitForReceipt = async (hash: string, attempts = 60, delayMs = 1000): Promise<any> => {
+      for (let i = 0; i < attempts; i++) {
+        try {
+          const receipt = await eth.request({ method: 'eth_getTransactionReceipt', params: [hash] });
+          if (receipt && receipt.blockNumber) return receipt;
+        } catch {}
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+      return null;
+    };
+
+    let txHash: string;
+    try {
+      // Resolve owner (from address) once for all EVM calls
+      const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+      const lowerAccounts = Array.isArray(accounts) ? accounts.map((a: string) => String(a).toLowerCase()) : [];
+      const provided = ((params.request as any)?.expectedSenderPrincipal || '').toString().toLowerCase();
+      let owner = '';
+      if (provided && lowerAccounts.includes(provided)) {
+        owner = accounts[lowerAccounts.indexOf(provided)] || '';
+      } else {
+        owner = (accounts && accounts[0]) || '';
+      }
+      if (!owner) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'EVM wallet not connected' });
+      debugLog(this.config.debug || false, 'evm from account', { owner });
+
+      if (isNative) {
+        const data = selector.payNative + idHex + toUint64(accountIdNum);
+        debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: data.length, value: amountHex });
+        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data, value: amountHex }] });
+      } else {
+        // Ensure allowance(owner -> spender=contractAddress)
+        const allowanceSelector = '0xdd62ed3e'; // allowance(address,address)
+        const approveSelector = '0x095ea7b3';   // approve(address,uint256)
+        const allowanceData = allowanceSelector + toAddressPadded(owner) + toAddressPadded(contractAddress);
+        debugLog(this.config.debug || false, 'evm erc20 allowance', { owner, spender: contractAddress, token: tokenAddress, data: allowanceData });
+        let allowanceHex: string = await eth.request({ method: 'eth_call', params: [{ to: String(tokenAddress), data: allowanceData }, 'latest'] });
+        if (typeof allowanceHex === 'string' && allowanceHex.startsWith('0x')) {
+          const allowance = BigInt(allowanceHex);
+          debugLog(this.config.debug || false, 'evm erc20 allowance result', { allowance: allowance.toString() });
+          if (allowance < params.amount) {
+            const approveData = approveSelector + toAddressPadded(contractAddress) + toUint256(params.amount);
+            debugLog(this.config.debug || false, 'evm erc20 approve', { to: tokenAddress, from: owner, dataLen: approveData.length, amount: params.amount.toString() });
+            const approveTx = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: String(tokenAddress), data: approveData }] });
+            debugLog(this.config.debug || false, 'evm erc20 approve sent', { tx: approveTx });
+            await waitForReceipt(approveTx, 90, 1000);
+          }
+        }
+        const data = selector.payERC20 + idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount);
+        debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: data.length });
+        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data }] });
+      }
+    } catch (e: any) {
+      try { debugLog(this.config.debug || false, 'evm tx error', { message: e?.message, code: e?.code, data: e?.data, error: e }); } catch {}
+      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'EVM transaction failed', details: e });
+    }
+
+    // Notify API with tx hash and wait for terminal status
+    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+    // Inform API immediately with tx hash so it can start indexing
+    try {
+      await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: txHash, maxAttempts: 1 });
+    } catch {}
+    const finalResponse = await this.awaitIntentTerminal({
+      paymentIntentId: params.paymentIntentId,
+      ledgerCanisterId: params.ledgerCanisterId!,
+      amount: params.amount.toString(),
+      metadata: { ...(params.metadata || {}), evmTxHash: txHash },
+    });
+    return finalResponse;
+  }
 
   /**
    * Show wallet connection modal
@@ -475,10 +911,7 @@ export class Icpay {
       debugLog(this.config.debug || false, 'createPayment start', { request });
       // Resolve ledgerCanisterId from symbol if needed
       let ledgerCanisterId = request.ledgerCanisterId;
-      if (!ledgerCanisterId && (request as any).symbol) {
-        ledgerCanisterId = await this.getLedgerCanisterIdBySymbol((request as any).symbol as string);
-      }
-      if (!ledgerCanisterId) {
+      if (!ledgerCanisterId && !(request as any).symbol) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
           message: 'Either ledgerCanisterId or symbol must be provided',
@@ -487,175 +920,41 @@ export class Icpay {
         this.emitMethodError('createPayment', err);
         throw err;
       }
-      // Fetch account info to get accountCanisterId if not provided
-      let accountCanisterId = request.accountCanisterId;
-      if (!accountCanisterId) {
-        debugLog(this.config.debug || false, 'fetching account info for accountCanisterId');
-        const accountInfo = await this.getAccountInfo();
-        accountCanisterId = accountInfo.accountCanisterId.toString();
-        debugLog(this.config.debug || false, 'accountCanisterId resolved', { accountCanisterId });
-      }
 
-      // Always use icpayCanisterId as toPrincipal
-      if (!this.icpayCanisterId) {
-        await this.fetchAccountInfo();
-      }
-      // Fallback: try public getAccountInfo if still missing
-      if (!this.icpayCanisterId) {
-        try {
-          const acct = await this.getAccountInfo();
-          if ((acct as any)?.icpayCanisterId) {
-            this.icpayCanisterId = (acct as any).icpayCanisterId.toString();
-          }
-        } catch {}
-      }
-      if (!this.icpayCanisterId || typeof this.icpayCanisterId !== 'string') {
-        const err = new IcpayError({
-          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Could not resolve ICPay canister ID from account info',
-          details: { accountInfoCache: this.accountInfoCache }
-        });
-        this.emitMethodError('createPayment', err);
-        throw err;
-      }
-
-      const toPrincipal = this.icpayCanisterId;
-      const host = this.icHost;
       let memo: Uint8Array | undefined = undefined;
-
-      // If onrampPayment is enabled (request or global config), branch to onramp flow
-      const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
-      if (onramp) {
-        // Only ICP ledger is allowed for onramp
-        if (ledgerCanisterId !== this.icpLedgerCanisterId) {
-          const err = new IcpayError({
-            code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-            message: 'Onramp is only supported for ICP ledger',
-            details: { provided: ledgerCanisterId, expected: this.icpLedgerCanisterId },
-          });
-          this.emitError(err);
-          throw err;
-        }
-
-        // Ensure amountUsd is provided or compute it
-        let amountUsd = (request as any).amountUsd as number | string | undefined;
-        if (amountUsd == null) {
-          try {
-            const res = await this.calculateTokenAmountFromUSD({
-              usdAmount: 1, // placeholder to fetch price
-              ledgerCanisterId,
-            });
-            // If price is P = USD per token, then amountUsd = amountTokens * P
-            const price = res.currentPrice;
-            const tokenAmount = typeof request.amount === 'string' ? Number(request.amount) : Number(request.amount);
-            amountUsd = price * (tokenAmount / Math.pow(10, res.decimals));
-          } catch {}
-        }
-
-        // Create payment intent directly (without requiring connected wallet), flagging onrampPayment
-        let paymentIntentId: string | null = null;
-        let paymentIntentCode: number | null = null;
-        try {
-          debugLog(this.config.debug || false, 'creating onramp payment intent');
-          const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
-            amount: request.amount,
-            symbol: (request as any).symbol,
-            ledgerCanisterId,
-            // expectedSenderPrincipal omitted in onramp
-            metadata: request.metadata || {},
-            onrampPayment: true,
-            widgetParams: request.widgetParams || {},
-            amountUsd: typeof amountUsd === 'string' ? amountUsd : (amountUsd != null ? amountUsd.toFixed(2) : undefined),
-          });
-          paymentIntentId = intentResp?.paymentIntentId || intentResp?.paymentIntent?.id || null;
-          paymentIntentCode = intentResp?.paymentIntentCode ?? null;
-          const onrampData = intentResp?.onramp || {};
-          // Return minimally required response and attach onramp data for widget init
-          return {
-            transactionId: 0,
-            status: 'pending',
-            amount: request.amount,
-            recipientCanister: this.icpayCanisterId!,
-            timestamp: new Date(),
-            metadata: {
-              paymentIntentId,
-              paymentIntentCode,
-              onramp: onrampData,
-            },
-          } as any;
-        } catch (e) {
-          const err = new IcpayError({
-            code: ICPAY_ERROR_CODES.API_ERROR,
-            message: 'Failed to create onramp payment intent',
-            details: e,
-            retryable: true,
-            userAction: 'Try again',
-          });
-          this.emitError(err);
-          throw err;
-        }
-      }
-
-      // Pre-flight: compute required amount for balance check before creating intent to avoid dangling intents
-      let preAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
-      if (!preAmountStr && (request as any).amountUsd != null) {
-        try {
-          const calc = await this.calculateTokenAmountFromUSD({ usdAmount: Number((request as any).amountUsd), ledgerCanisterId });
-          preAmountStr = calc.tokenAmountDecimals;
-        } catch {}
-      }
-      if (!preAmountStr) {
-        const err = new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Either amount or amountUsd must be provided' });
-        this.emitError(err);
-        throw err;
-      }
-
-      // Check balance before sending
-      const requiredAmount = BigInt(preAmountStr);
-      debugLog(this.config.debug || false, 'checking balance', { ledgerCanisterId, requiredAmount: requiredAmount.toString() });
-
-      // Helper function to make amounts human-readable
-      const formatAmount = (amount: bigint, decimals: number = 8, symbol: string = '') => {
-        const divisor = BigInt(10 ** decimals);
-        const whole = amount / divisor;
-        const fraction = amount % divisor;
-        const fractionStr = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
-        return `${whole}${fractionStr ? '.' + fractionStr : ''} ${symbol}`.trim();
-      };
-
-        // Check if user has sufficient balance based on ledger type
-        try {
-          // Get the actual balance from the specific ledger (works for all ICRC ledgers including ICP)
-          const actualBalance = await this.getLedgerBalance(ledgerCanisterId);
-
-          if (actualBalance < requiredAmount) {
-            const requiredFormatted = formatAmount(requiredAmount, 8, 'tokens');
-            const availableFormatted = formatAmount(actualBalance, 8, 'tokens');
-            throw createBalanceError(requiredFormatted, availableFormatted, {
-              required: requiredAmount,
-              available: actualBalance,
-              ledgerCanisterId
-            });
-          }
-          debugLog(this.config.debug || false, 'balance ok', { actualBalance: actualBalance.toString() });
-        } catch (balanceError) {
-          // If we can't fetch the specific ledger balance, fall back to the old logic
-          throw new IcpayError({
-            code: 'INSUFFICIENT_BALANCE',
-            message: 'Insufficient balance',
-            details: { required: requiredAmount, available: 0 }
-          });
-        }
 
       // 1) Create payment intent via API (backend will finalize amount/price)
       let paymentIntentId: string | null = null;
       let paymentIntentCode: number | null = null;
+      let intentChainType: string | undefined;
+      let intentChainId: string | number | undefined;
+      let accountCanisterId: string;
       let resolvedAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
       try {
         debugLog(this.config.debug || false, 'creating payment intent');
 
-        // Get the expected sender principal from connected wallet
-        const expectedSenderPrincipal = this.connectedWallet?.owner || this.connectedWallet?.principal?.toString();
+        // Expected sender principal: allow override via request, fallback to connected wallet, then EVM provider
+        let expectedSenderPrincipal: string | undefined = (request as any).expectedSenderPrincipal
+          || this.connectedWallet?.owner
+          || this.connectedWallet?.principal?.toString();
+        if ((globalThis as any)?.ethereum?.request) {
+          try {
+            const eth = (globalThis as any).ethereum;
+            const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+            if (Array.isArray(accounts) && accounts[0]) {
+              const lowerAccounts = accounts.map((a: string) => String(a).toLowerCase());
+              const providedRaw = (request as any)?.expectedSenderPrincipal;
+              if (providedRaw) {
+                const provided = String(providedRaw).toLowerCase();
+                expectedSenderPrincipal = lowerAccounts.includes(provided)
+                  ? accounts[lowerAccounts.indexOf(provided)]
+                  : (expectedSenderPrincipal || accounts[0]);
+              } else if (!expectedSenderPrincipal) {
+                expectedSenderPrincipal = accounts[0];
+              }
+            }
+          } catch {}
+        }
         if (!expectedSenderPrincipal) {
           throw new IcpayError({
             code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED,
@@ -666,18 +965,30 @@ export class Icpay {
           });
         }
 
+        const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
         const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
-          amount: request.amount,
+          amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
           symbol: (request as any).symbol,
           ledgerCanisterId,
           expectedSenderPrincipal,
           metadata: request.metadata || {},
           amountUsd: (request as any).amountUsd,
           chainId: (request as any).chainId,
+          onrampPayment: onramp || undefined,
+          widgetParams: request.widgetParams || undefined,
         });
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
         resolvedAmountStr = intentResp?.paymentIntent?.amount || resolvedAmountStr;
+        intentChainType = intentResp?.paymentIntent?.chainType || intentResp?.paymentIntent?.networkType || intentResp?.chainType;
+        intentChainId = intentResp?.paymentIntent?.chainId || intentResp?.chainId || (request as any).chainId;
+        const onrampData = intentResp?.onramp || null;
+        const contractAddress = intentResp?.paymentIntent?.contractAddress || null;
+        const rpcUrlPublic = intentResp?.paymentIntent?.rpcUrlPublic || null;
+        const chainNameFromIntent = intentResp?.paymentIntent?.chainName || null;
+        const rpcChainId = intentResp?.paymentIntent?.rpcChainId || null;
+        const functionSelectors = intentResp?.paymentIntent?.functionSelectors || null;
+        accountCanisterId = intentResp?.paymentIntent?.accountCanisterId || null;
         debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal, resolvedAmountStr });
         // Emit transaction created event
         if (paymentIntentId) {
@@ -685,9 +996,16 @@ export class Icpay {
             paymentIntentId,
             amount: resolvedAmountStr,
             ledgerCanisterId,
-            expectedSenderPrincipal
+            expectedSenderPrincipal,
+            accountCanisterId,
           });
         }
+        (request as any).__onramp = onrampData;
+        (request as any).__contractAddress = contractAddress;
+        (request as any).__rpcUrlPublic = rpcUrlPublic;
+        (request as any).__chainName = chainNameFromIntent;
+        (request as any).__functionSelectors = functionSelectors;
+        (request as any).__rpcChainId = rpcChainId;
       } catch (e) {
         // Do not proceed without a payment intent
         const err = new IcpayError({
@@ -712,115 +1030,32 @@ export class Icpay {
 
       const amount = BigInt(resolvedAmountStr);
 
-      // Build packed memo if possible
+      // Build packed memo
       const acctIdNum = parseInt(accountCanisterId);
       if (!isNaN(acctIdNum) && paymentIntentCode != null) {
         memo = this.createPackedMemo(acctIdNum, Number(paymentIntentCode));
         debugLog(this.config.debug || false, 'built packed memo', { accountCanisterId: acctIdNum, paymentIntentCode });
       }
+      debugLog(this.config.debug || false, 'memo', { memo, accountCanisterId, paymentIntentCode });
 
-      debugLog(this.config.debug || false, 'memo', { memo });
-
-      let transferResult;
-      try {
-        // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
-        debugLog(this.config.debug || false, 'sending ICRC-1 transfer (ICP)');
-        transferResult = await this.sendFundsToLedger(
-          ledgerCanisterId,
-          toPrincipal,
-          amount,
-          memo,
-          host
-        );
-      } catch (transferError: any) {
-        // Some wallets/networks return a timeout or transient 5xx even when the transfer was accepted.
-        // Treat these as processing and continue with intent notification so users don't double-send.
-        const msg = String(transferError?.message || '');
-        const lower = msg.toLowerCase();
-        const isTimeout = lower.includes('request timed out');
-        const isProcessing = isTimeout && lower.includes('processing');
-        // DFINITY HTTP agent transient error when subnet has no healthy nodes (e.g., during upgrade)
-        const isNoHealthyNodes = lower.includes('no_healthy_nodes') || lower.includes('service unavailable') || lower.includes('503');
-        // Plug inpage transport sometimes throws readState errors after a signed call even though the tx went through
-        const isPlugReadState = lower.includes('read state request') || lower.includes('readstate') || lower.includes('response could not be found');
-        if (isTimeout || isProcessing || isNoHealthyNodes || isPlugReadState) {
-          debugLog(this.config.debug || false, 'transfer timed out, proceeding with intent notification', { message: msg });
-          // Long-poll the public notify endpoint using only the intent id (no canister tx id available)
-          const publicNotify = await this.performNotifyPaymentIntent({
-            paymentIntentId: paymentIntentId!,
-            maxAttempts: 120,
-            delayMs: 1000,
-          });
-          // Derive status from API response
-          let statusString: 'pending' | 'completed' | 'failed' = 'pending';
-          const apiStatus = (publicNotify as any)?.paymentIntent?.status || (publicNotify as any)?.payment?.status || (publicNotify as any)?.status;
-          if (typeof apiStatus === 'string') {
-            const norm = apiStatus.toLowerCase();
-            if (norm === 'completed' || norm === 'succeeded') statusString = 'completed';
-            else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') statusString = 'failed';
-          }
-          const response = {
-            transactionId: 0,
-            status: statusString,
-            amount: amount.toString(),
-            recipientCanister: ledgerCanisterId,
-            timestamp: new Date(),
-            description: 'Fund transfer',
-            metadata: request.metadata,
-            payment: publicNotify,
-          } as any;
-          if (statusString === 'completed') {
-            const requested = (publicNotify as any)?.payment?.requestedAmount || null;
-            const paid = (publicNotify as any)?.payment?.paidAmount || null;
-            const isMismatched = (publicNotify as any)?.payment?.status === 'mismatched';
-            if (isMismatched) {
-              this.emit('icpay-sdk-transaction-mismatched', { ...response, requestedAmount: requested, paidAmount: paid });
-              this.emit('icpay-sdk-transaction-updated', { ...response, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
-            } else {
-              this.emit('icpay-sdk-transaction-completed', response);
-            }
-          } else if (statusString === 'failed') {
-            this.emit('icpay-sdk-transaction-failed', response);
-          } else {
-            this.emit('icpay-sdk-transaction-updated', response);
-          }
-          this.emitMethodSuccess('createPayment', response);
-          return response;
-        }
-        throw transferError;
-      }
-
-      // Assume transferResult returns a block index or transaction id
-      const blockIndex = transferResult?.Ok?.toString() || transferResult?.blockIndex?.toString() || `temp-${Date.now()}`;
-      debugLog(this.config.debug || false, 'transfer result', { blockIndex });
-
-      // First, notify the canister about the ledger transaction (best-effort)
-      let canisterTransactionId: number;
-      try {
-        debugLog(this.config.debug || false, 'notifying canister about ledger tx');
-        const notifyRes: any = await this.notifyLedgerTransaction(
-          this.icpayCanisterId!,
-          ledgerCanisterId,
-          BigInt(blockIndex)
-        );
-        if (typeof notifyRes === 'string') {
-          canisterTransactionId = parseInt(notifyRes, 10);
-        } else {
-          canisterTransactionId = parseInt(notifyRes.id, 10);
-        }
-        debugLog(this.config.debug || false, 'canister notified', { canisterTransactionId });
-      } catch (notifyError) {
-        canisterTransactionId = parseInt(blockIndex, 10);
-        debugLog(this.config.debug || false, 'notify failed, using blockIndex as tx id', { canisterTransactionId });
-      }
-
-      // Durable wait until API returns terminal status (completed/mismatched/failed/canceled)
-      const finalResponse = await this.awaitIntentTerminal({
-        paymentIntentId: paymentIntentId!,
-        canisterTransactionId: canisterTransactionId?.toString(),
+      // Delegate to chain-specific processing
+      const finalResponse = await this.processPaymentByChain({
+        chainType: intentChainType,
+        chainId: intentChainId,
         ledgerCanisterId,
-        amount: amount.toString(),
+        amount,
+        memo,
+        paymentIntentId: paymentIntentId!,
+        request,
+        resolvedAmountStr: amount.toString(),
         metadata: request.metadata,
+        onrampData: (request as any).__onramp,
+        contractAddress: (request as any).__contractAddress,
+        accountCanisterId,
+        rpcUrlPublic: (request as any).__rpcUrlPublic,
+        chainName: (request as any).__chainName,
+        rpcChainId: (request as any).__rpcChainId,
+        paymentIntentCode,
       });
       this.emitMethodSuccess('createPayment', finalResponse);
       return finalResponse;
@@ -1103,72 +1338,54 @@ export class Icpay {
   // ===== NEW ENHANCED SDK FUNCTIONS =====
 
   /**
-   * Get balance for all verified ledgers for the connected wallet (public method)
+   * Public: Get balances for an external wallet (IC principal or EVM address) using publishable key
    */
-  async getAllLedgerBalances(): Promise<AllLedgerBalances> {
-    this.emitMethodStart('getAllLedgerBalances');
+  async getExternalWalletBalances(params: { network: 'evm' | 'ic'; address?: string; principal?: string; chainId?: string; amountUsd?: number; amount?: string; chainShortcodes?: string[]; ledgerShortcodes?: string[] }): Promise<AllLedgerBalances> {
+    this.emitMethodStart('getExternalWalletBalances', { params });
     try {
-      if (!this.isWalletConnected()) {
-        throw new IcpayError({
-          code: 'WALLET_NOT_CONNECTED',
-          message: 'Wallet must be connected to fetch balances'
-        });
-      }
-
-      const verifiedLedgers = await this.getVerifiedLedgers();
-      const balances: LedgerBalance[] = [];
-      let totalBalancesUSD = 0;
-
-      for (const ledger of verifiedLedgers) {
-        try {
-          const rawBalance = await this.getLedgerBalance(ledger.canisterId);
-          const formattedBalance = this.formatBalance(rawBalance.toString(), ledger.decimals);
-
-          const balance: LedgerBalance = {
-            ledgerId: ledger.id,
-            ledgerName: ledger.name,
-            ledgerSymbol: ledger.symbol,
-            canisterId: ledger.canisterId,
-            balance: rawBalance.toString(),
-            formattedBalance,
-            decimals: ledger.decimals,
-            currentPrice: ledger.currentPrice || undefined,
-            lastPriceUpdate: ledger.lastPriceUpdate ? new Date(ledger.lastPriceUpdate) : undefined,
-            lastUpdated: new Date()
-          };
-
-          balances.push(balance);
-
-          // Calculate USD value if price is available
-          if (ledger.currentPrice && rawBalance > 0) {
-            const humanReadableBalance = parseFloat(formattedBalance);
-            totalBalancesUSD += humanReadableBalance * ledger.currentPrice;
-          }
-        } catch (error) {
-          this.emit('icpay-sdk-method-error', {
-            name: 'getAllLedgerBalances.getLedgerBalance',
-            error,
-            ledgerSymbol: ledger.symbol,
-            ledgerCanisterId: ledger.canisterId
-          });
-          // Continue with other ledgers even if one fails
-        }
-      }
-
-      const result = {
-        balances,
-        totalBalancesUSD: totalBalancesUSD > 0 ? totalBalancesUSD : undefined,
-        lastUpdated: new Date()
+      const search = new URLSearchParams();
+      if (params.network) search.set('network', params.network);
+      if (params.address) search.set('address', params.address);
+      if (params.principal) search.set('principal', params.principal);
+      if (params.chainId) search.set('chainId', params.chainId);
+      if (typeof params.amountUsd === 'number' && isFinite(params.amountUsd)) search.set('amountUsd', String(params.amountUsd));
+      if (typeof params.amount === 'string' && params.amount) search.set('amount', params.amount);
+      if (Array.isArray(params.chainShortcodes) && params.chainShortcodes.length > 0) search.set('chainShortcodes', params.chainShortcodes.join(','));
+      if (Array.isArray(params.ledgerShortcodes) && params.ledgerShortcodes.length > 0) search.set('ledgerShortcodes', params.ledgerShortcodes.join(','));
+      const response: any = await this.publicApiClient.get(`/sdk/public/wallet/external-balances?${search.toString()}`);
+      const result: AllLedgerBalances = {
+        balances: (response?.balances || []).map((balance: any) => ({
+          ledgerId: balance.ledgerId,
+          ledgerName: balance.ledgerName,
+          ledgerSymbol: balance.ledgerSymbol,
+          canisterId: balance.canisterId,
+          balance: balance.balance,
+          formattedBalance: balance.formattedBalance,
+          decimals: balance.decimals,
+          currentPrice: balance.currentPrice,
+          lastPriceUpdate: balance.lastPriceUpdate ? new Date(balance.lastPriceUpdate) : undefined,
+          lastUpdated: balance.lastUpdated ? new Date(balance.lastUpdated) : new Date(),
+          // Chain metadata passthrough for multichain UX
+          chainId: typeof balance.chainId === 'string' ? balance.chainId : (typeof balance.chainId === 'number' ? String(balance.chainId) : undefined),
+          chainName: balance.chainName ?? (balance.chain && (balance.chain.name || balance.chain.chainName)) ?? null,
+          rpcUrlPublic: balance.rpcUrlPublic ?? null,
+          chainUuid: balance.chainUuid ?? null,
+          requiredAmount: balance.requiredAmount,
+          requiredAmountFormatted: balance.requiredAmountFormatted,
+          hasSufficientBalance: balance.hasSufficientBalance,
+        })),
+        totalBalancesUSD: response?.totalBalancesUSD,
+        lastUpdated: new Date(response?.lastUpdated || Date.now()),
       };
-      this.emitMethodSuccess('getAllLedgerBalances', { count: balances.length, totalUSD: result.totalBalancesUSD });
+      this.emitMethodSuccess('getExternalWalletBalances', { count: result.balances.length, totalUSD: result.totalBalancesUSD });
       return result;
     } catch (error) {
       const err = new IcpayError({
-        code: 'BALANCES_FETCH_FAILED',
-        message: 'Failed to fetch all ledger balances',
-        details: error
+        code: 'ACCOUNT_WALLET_BALANCES_FETCH_FAILED',
+        message: 'Failed to fetch external wallet balances (public)',
+        details: error,
       });
-      this.emitMethodError('getAllLedgerBalances', err);
+      this.emitMethodError('getExternalWalletBalances', err);
       throw err;
     }
   }
@@ -1302,6 +1519,8 @@ export class Icpay {
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
+        chainId: ledger.chainId,
+        shortcode: ledger.shortcode ?? null,
         canisterId: ledger.canisterId,
         standard: ledger.standard,
         decimals: ledger.decimals,
@@ -1363,6 +1582,7 @@ export class Icpay {
         metadata: request.metadata,
         onrampPayment: request.onrampPayment,
         widgetParams: request.widgetParams,
+        chainId: (request as any).chainId,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
@@ -1421,7 +1641,7 @@ export class Icpay {
   }
 
   /** Reusable notify helper for both ledger flow and onramp */
-  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string }): Promise<any> {
+  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string }): Promise<any> {
     const notifyClient = this.publicApiClient;
     const notifyPath = '/sdk/public/payments/notify';
     const maxAttempts = params.maxAttempts ?? 1;
@@ -1431,6 +1651,7 @@ export class Icpay {
         debugLog(this.config.debug || false, 'notify payment intent', { attempt, notifyPath, paymentIntentId: params.paymentIntentId, canisterTxId: params.canisterTransactionId });
         const body: any = { paymentIntentId: params.paymentIntentId };
         if (params.canisterTransactionId) body.canisterTxId = params.canisterTransactionId;
+        if (params.transactionId) body.transactionId = params.transactionId;
         if (params.orderId) body.orderId = params.orderId;
         const resp: any = await notifyClient.post(notifyPath, body);
         // If this is the last attempt, return whatever we got
@@ -1536,6 +1757,8 @@ export class Icpay {
         id: ledger.id,
         name: ledger.name,
         symbol: ledger.symbol,
+        chainId: ledger.chainId,
+        shortcode: ledger.shortcode ?? null,
         canisterId: ledger.canisterId,
         standard: ledger.standard,
         decimals: ledger.decimals,
