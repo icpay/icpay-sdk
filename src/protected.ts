@@ -416,6 +416,7 @@ export function createProtectedApi(params: {
         throw err;
       }
     },
+
   };
 }
 
