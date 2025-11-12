@@ -1,3 +1,4 @@
+import { buildAndSignX402PaymentHeader } from './x402/builders';
 import {
   IcpayConfig,
   CreateTransactionRequest,
@@ -765,6 +766,7 @@ export class Icpay {
     } catch {}
     const finalResponse = await this.awaitIntentTerminal({
       paymentIntentId: params.paymentIntentId,
+      transactionId: txHash,
       ledgerCanisterId: params.ledgerCanisterId!,
       amount: params.amount.toString(),
       metadata: { ...(params.metadata || {}), evmTxHash: txHash },
@@ -970,6 +972,7 @@ export class Icpay {
           amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
           symbol: (request as any).symbol,
           ledgerCanisterId,
+          description: (request as any).description,
           expectedSenderPrincipal,
           metadata: request.metadata || {},
           amountUsd: (request as any).amountUsd,
@@ -1359,6 +1362,8 @@ export class Icpay {
           ledgerName: balance.ledgerName,
           ledgerSymbol: balance.ledgerSymbol,
           canisterId: balance.canisterId,
+          eip3009Version: balance?.eip3009Version ?? null,
+          x402Accepts: balance?.x402Accepts != null ? Boolean(balance.x402Accepts) : undefined,
           balance: balance.balance,
           formattedBalance: balance.formattedBalance,
           decimals: balance.decimals,
@@ -1578,6 +1583,7 @@ export class Icpay {
         ledgerCanisterId,
         symbol: (request as any).symbol,
         amountUsd: usdAmount,
+        description: (request as any).description,
         accountCanisterId: request.accountCanisterId,
         metadata: request.metadata,
         onrampPayment: request.onrampPayment,
@@ -1599,6 +1605,173 @@ export class Icpay {
         details: error
       });
       this.emitMethodError('createPaymentUsd', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Create an X402 payment from a USD amount
+   * Falls back to regular flow at caller level if unavailable.
+   */
+  async createPaymentX402Usd(request: CreatePaymentUsdRequest): Promise<TransactionResponse> {
+    this.emitMethodStart('createPaymentX402Usd', { request });
+    try {
+      const usdAmount = typeof request.usdAmount === 'string' ? parseFloat(request.usdAmount) : request.usdAmount;
+
+      // For X402, the backend will resolve ledger/symbol as needed from the intent.
+      // We forward both amountUsd and amount (if provided), and do not resolve canister here.
+      const ledgerCanisterId = request.ledgerCanisterId || '';
+
+      // Hit X402 endpoint
+      const body: any = {
+        amount: (request as any).amount,
+        amountUsd: usdAmount,
+        symbol: (request as any).symbol,
+        ledgerCanisterId,
+        description: (request as any).description,
+        metadata: request.metadata,
+        chainId: (request as any).chainId,
+        x402: true,
+      };
+
+      try {
+        const resp: any = await this.publicApiClient.post('/sdk/public/payments/intents/x402', body);
+        // If backend chooses to return 200 with intent data, treat similarly to regular flow
+        const normalized = {
+          transactionId: 0,
+          status: 'pending',
+          amount: (resp?.paymentIntent?.amount || resp?.amount || request.usdAmount)?.toString?.() || String(request.usdAmount),
+          recipientCanister: ledgerCanisterId,
+          timestamp: new Date(),
+          metadata: { ...(request.metadata || {}), x402: true },
+          payment: resp,
+        } as any;
+        this.emitMethodSuccess('createPaymentX402Usd', normalized);
+        return normalized;
+      } catch (e: any) {
+        // If API responds with HTTP 402 to trigger wallet X402 flow, begin settlement wait instead of erroring
+        if (e && typeof e.status === 'number' && e.status === 402) {
+          // Try to extract paymentIntentId from response data to start polling
+          const data = e?.data || {};
+          // Support new x402 Payment Required Response body:
+          // { x402Version, accepts: [{ ..., extra: { intentId } }], error }
+          let paymentIntentId: string | null = data?.paymentIntentId || null;
+          if (!paymentIntentId && Array.isArray(data?.accepts) && data.accepts[0]?.extra?.intentId) {
+            paymentIntentId = String(data.accepts[0].extra.intentId);
+          }
+          if (paymentIntentId) {
+            // Prefer ledgerCanisterId from request/body; fallback to server response if present
+            const acceptsArr: any[] = Array.isArray(data?.accepts) ? data.accepts : [];
+            let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
+
+            if (requirement) {
+              try {
+                const paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
+                  x402Version: Number(data?.x402Version || 1),
+                  debug: this.config?.debug || false,
+                });
+                // Start verification stage while we wait for settlement to process
+                try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
+                  paymentIntentId,
+                  paymentHeader,
+                  paymentRequirements: requirement,
+                });
+                try {
+                  debugLog(this.config?.debug || false, 'x402 settle response (from icpay-services via api)', {
+                    ok: (settleResp as any)?.ok,
+                    status: (settleResp as any)?.status,
+                    txHash: (settleResp as any)?.txHash,
+                    paymentIntentId: (settleResp as any)?.paymentIntent?.id,
+                    paymentId: (settleResp as any)?.payment?.id,
+                    rawKeys: Object.keys(settleResp || {}),
+                  });
+                } catch {}
+                // Move to "Payment confirmation" stage (confirm loading)
+                try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                const status = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
+                const amountStr =
+                  (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
+                  (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+                const out = {
+                  transactionId: Number(settleResp?.canisterTxId || 0),
+                  status: status === 'succeeded' ? 'completed' : status,
+                  amount: amountStr,
+                  recipientCanister: ledgerCanisterId,
+                  timestamp: new Date(),
+                  metadata: { ...(request.metadata || {}), x402: true },
+                  payment: settleResp || null,
+                } as any;
+                const isTerminal = (() => {
+                  const s = String(out.status || '').toLowerCase();
+                  return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
+                })();
+                if (isTerminal) {
+                  if (out.status === 'completed') {
+                    this.emit('icpay-sdk-transaction-completed', out);
+                  } else if (out.status === 'failed') {
+                    this.emit('icpay-sdk-transaction-failed', out);
+                  } else {
+                    this.emit('icpay-sdk-transaction-updated', out);
+                  }
+                  this.emitMethodSuccess('createPaymentX402Usd', out);
+                  return out;
+                }
+                // Non-terminal (e.g., requires_payment). Continue notifying until terminal.
+                try { this.emit('icpay-sdk-transaction-updated', out); } catch {}
+                const waited = await this.awaitIntentTerminal({
+                  paymentIntentId,
+                  ledgerCanisterId: ledgerCanisterId,
+                  amount: amountStr,
+                  metadata: { ...(request.metadata || {}), x402: true },
+                });
+                this.emitMethodSuccess('createPaymentX402Usd', waited);
+                return waited;
+              } catch {
+                // Fall through to notify-based wait if settle endpoint not available
+              }
+            }
+            // Fallback: wait until terminal via notify loop
+            const amountStr =
+              (data?.paymentIntent?.amount && String(data.paymentIntent.amount)) ||
+              (Array.isArray(data?.accepts) && data.accepts[0]?.maxAmountRequired && String(data.accepts[0].maxAmountRequired)) ||
+              (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+            const finalResponse = await this.awaitIntentTerminal({
+              paymentIntentId,
+              ledgerCanisterId: ledgerCanisterId,
+              amount: amountStr,
+              metadata: { ...(request.metadata || {}), x402: true },
+            });
+            this.emitMethodSuccess('createPaymentX402Usd', finalResponse);
+            return finalResponse;
+          }
+          // No intent id provided: return a pending response with x402 metadata
+          const pending = {
+            transactionId: 0,
+            status: 'pending',
+            amount: (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0'),
+            recipientCanister: ledgerCanisterId || null,
+            timestamp: new Date(),
+            metadata: { ...(request.metadata || {}), x402: true },
+            payment: null,
+          } as any;
+          this.emitMethodSuccess('createPaymentX402Usd', pending);
+          return pending;
+        }
+        // Any other error: rethrow to allow caller fallback
+        throw e;
+      }
+    } catch (error) {
+      if (error instanceof IcpayError) {
+        this.emitMethodError('createPaymentX402Usd', error);
+        throw error;
+      }
+      const err = new IcpayError({
+        code: ICPAY_ERROR_CODES.API_ERROR,
+        message: 'X402 payment flow not available',
+        details: error,
+      });
+      this.emitMethodError('createPaymentX402Usd', err);
       throw err;
     }
   }
@@ -1686,7 +1859,7 @@ export class Icpay {
   // Retries indefinitely by default, backing off modestly, and only returns
   // when status is terminal. Never throws after funds are sent unless API reports
   // an explicit failure state.
-  private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; ledgerCanisterId: string; amount: string; metadata?: any }): Promise<any> {
+  private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; ledgerCanisterId: string; amount: string; metadata?: any }): Promise<any> {
     const baseDelay = 1000;
     const maxDelay = 10000;
     let attempt = 0;
@@ -1696,6 +1869,7 @@ export class Icpay {
         const resp = await this.performNotifyPaymentIntent({
           paymentIntentId: params.paymentIntentId,
           canisterTransactionId: params.canisterTransactionId,
+          transactionId: params.transactionId || (params?.metadata?.evmTxHash ? String(params.metadata.evmTxHash) : undefined),
           maxAttempts: 1,
           delayMs: 0,
         });

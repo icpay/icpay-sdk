@@ -106,6 +106,7 @@ export interface CreateTransactionRequest {
   amount?: string;
   ledgerCanisterId?: string;
   symbol?: string;
+  description?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
@@ -175,6 +176,8 @@ export interface LedgerBalance {
   ledgerName: string;
   ledgerSymbol: string;
   canisterId: string;
+  eip3009Version?: string | null;
+  x402Accepts?: boolean;
   balance: string; // Raw balance in smallest unit
   formattedBalance: string; // Human readable balance
   decimals: number;
@@ -576,6 +579,7 @@ export interface CreatePaymentUsdRequest {
   usdAmount: string | number;
   ledgerCanisterId?: string;
   symbol?: string;
+  description?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
