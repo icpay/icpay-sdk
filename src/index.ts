@@ -1636,7 +1636,23 @@ export class Icpay {
 
       try {
         const resp: any = await this.publicApiClient.post('/sdk/public/payments/intents/x402', body);
-        // If backend chooses to return 200 with intent data, treat similarly to regular flow
+        // If backend returned normal flow (no accepts), skip x402 and proceed with regular intent polling
+        const hasAccepts = Array.isArray(resp?.accepts) && resp.accepts.length > 0;
+        if (!hasAccepts) {
+          // Fallback: return a pending-normal response if intent id missing
+          const pending = {
+            transactionId: 0,
+            status: 'pending',
+            amount: (request as any).amount,
+            recipientCanister: ledgerCanisterId,
+            timestamp: new Date(),
+            metadata: { ...(request.metadata || {}) },
+            payment: resp,
+          } as any;
+          this.emitMethodSuccess('createPaymentX402Usd', pending);
+          return pending;
+        }
+        // If backend returned accepts despite 200, keep previous behavior (pending with x402 metadata)
         const normalized = {
           transactionId: 0,
           status: 'pending',
