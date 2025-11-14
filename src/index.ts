@@ -1702,6 +1702,15 @@ export class Icpay {
                   metadata: { ...(request.metadata || {}), x402: true },
                   payment: settleResp || null,
                 } as any;
+                // If x402 failed due to minimal limits, emit failure and fall back to normal flow
+                const failMsg = (settleResp as any)?.message || (settleResp as any)?.error || '';
+                if (out.status === 'failed' && (failMsg === 'x402_minimal_platform_fee_not_met' || failMsg === 'x402_minimum_amount_not_met')) {
+                  try { this.emit('icpay-sdk-transaction-failed', { ...out, reason: failMsg }); } catch {}
+                  // Initiate regular flow (non-x402) with the same request
+                  const fallback = await this.createPaymentUsd(request);
+                  this.emitMethodSuccess('createPaymentX402Usd', fallback);
+                  return fallback;
+                }
                 const isTerminal = (() => {
                   const s = String(out.status || '').toLowerCase();
                   return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
