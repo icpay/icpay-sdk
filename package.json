@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Official icpay SDK for Internet Computer payments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
