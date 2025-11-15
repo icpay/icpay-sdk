@@ -625,7 +625,7 @@ export class Icpay {
         message: 'Missing EVM contract address in payment intent',
       });
     }
-    const eth = (globalThis as any)?.ethereum || (typeof window !== 'undefined' ? (window as any).ethereum : null);
+    const eth = (this.config as any)?.evmProvider || (globalThis as any)?.ethereum || (typeof window !== 'undefined' ? (window as any).ethereum : null);
     if (!eth || !eth.request) {
       throw new IcpayError({
         code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE,
@@ -939,10 +939,10 @@ export class Icpay {
         let expectedSenderPrincipal: string | undefined = (request as any).expectedSenderPrincipal
           || this.connectedWallet?.owner
           || this.connectedWallet?.principal?.toString();
-        if ((globalThis as any)?.ethereum?.request) {
+        const evm = (this.config as any)?.evmProvider || (globalThis as any)?.ethereum;
+        if (evm?.request) {
           try {
-            const eth = (globalThis as any).ethereum;
-            const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+            const accounts: string[] = await evm.request({ method: 'eth_accounts' });
             if (Array.isArray(accounts) && accounts[0]) {
               const lowerAccounts = accounts.map((a: string) => String(a).toLowerCase());
               const providedRaw = (request as any)?.expectedSenderPrincipal;
@@ -1684,6 +1684,7 @@ export class Icpay {
                 const paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
                   x402Version: Number(data?.x402Version || 1),
                   debug: this.config?.debug || false,
+                  provider: (this.config as any)?.evmProvider || (typeof (globalThis as any)?.ethereum !== 'undefined' ? (globalThis as any).ethereum : undefined),
                 });
                 // Start verification stage while we wait for settlement to process
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
