@@ -12,6 +12,11 @@ export interface IcpayConfig {
   connectedWallet?: ConnectedWallet;
   icHost?: string; // IC network host for agent-js
   /**
+   * Optional: Selected EVM provider to use for EVM flows (signing, calls).
+   * If provided, SDK will prefer this over window.ethereum.
+   */
+  evmProvider?: any;
+  /**
    * Optional: Provide a function to create an actor for any canister
    * (canisterId: string, idl: any) => ActorSubclass<any>
    */

@@ -111,13 +111,30 @@ export function buildX402HeaderFromAuthorization(input: {
  */
 export async function buildAndSignX402PaymentHeader(
   requirement: X402Acceptance,
-  context?: { x402Version?: number; debug?: boolean }
+  context?: { x402Version?: number; debug?: boolean; provider?: any }
 ): Promise<string> {
   const w: any = (globalThis as any)?.window || (globalThis as any);
-  const eth = w?.ethereum;
+  const eth = (context as any)?.provider || w?.ethereum;
   if (!eth || !eth.request) {
     throw new Error('No EVM wallet available for X402');
   }
+  // Ensure wallet is on the intended chain for reliable eth_call (token name) and consistent UX
+  try {
+    const netStr = (requirement?.network as any) || '';
+    const chainIdDec = typeof netStr === 'string' ? parseInt(netStr, 10) : Number(netStr || 0);
+    if (Number.isFinite(chainIdDec) && chainIdDec > 0) {
+      const hex = '0x' + chainIdDec.toString(16);
+      try {
+        const currentHex: string = await eth.request({ method: 'eth_chainId' });
+        if (typeof currentHex !== 'string' || currentHex.toLowerCase() !== hex.toLowerCase()) {
+          await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] });
+        }
+      } catch {
+        // Best-effort: if switch fails, continue; signing does not require chain match,
+        // but eth_call for token name may fail. We'll handle that gracefully.
+      }
+    }
+  } catch {}
   const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
   const from: string = (accounts && accounts[0]) || '';
   if (!from) throw new Error('No wallet account available for X402');
