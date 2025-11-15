@@ -1378,6 +1378,7 @@ export class Icpay {
           requiredAmount: balance.requiredAmount,
           requiredAmountFormatted: balance.requiredAmountFormatted,
           hasSufficientBalance: balance.hasSufficientBalance,
+          logoUrl: balance.logoUrl ?? null,
         })),
         totalBalancesUSD: response?.totalBalancesUSD,
         lastUpdated: new Date(response?.lastUpdated || Date.now()),
