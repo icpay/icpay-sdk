@@ -101,7 +101,6 @@ export interface Transaction {
   blockHeight?: string;
   fee?: string;
   metadata?: any;
-  errorMessage?: string;
   processedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -197,6 +196,8 @@ export interface LedgerBalance {
   chainName?: string | null;   // e.g. 'Base Sepolia'
   rpcUrlPublic?: string | null;
   chainUuid?: string | null;   // backend chain UUID
+  // Token icon
+  logoUrl?: string | null;
 }
 
 export interface AllLedgerBalances {
@@ -479,7 +480,7 @@ export interface SdkRefund {
 
 export interface SdkPayout {
   id: string;
-  accountId: string;
+  accountId: string | null;
   walletId: string | null;
   userId: string | null;
   amount: string;
