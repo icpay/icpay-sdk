@@ -71,11 +71,19 @@ export interface VerifiedLedger {
   id: string;
   name: string;
   symbol: string;
+  shortcode?: string | null;
   canisterId: string;
+  chainId?: string;
+  family?: string;
   decimals: number;
   logoUrl: string | null;
   verified: boolean;
   fee: string | null;
+  network?: string;
+  description?: string | null;
+  x402Accepts?: boolean;
+  eip3009Version?: string | null;
+  coingeckoId?: string | null;
   // Price-related fields
   currentPrice?: number | null;
   lastPriceUpdate?: string | null;
@@ -110,6 +118,7 @@ export interface CreateTransactionRequest {
   amount?: string;
   ledgerCanisterId?: string;
   symbol?: string;
+  tokenShortcode?: string;
   description?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
@@ -179,6 +188,7 @@ export interface LedgerBalance {
   ledgerId: string;
   ledgerName: string;
   ledgerSymbol: string;
+  tokenShortcode?: string | null;
   canisterId: string;
   eip3009Version?: string | null;
   x402Accepts?: boolean;
@@ -585,6 +595,7 @@ export interface CreatePaymentUsdRequest {
   usdAmount: string | number;
   ledgerCanisterId?: string;
   symbol?: string;
+  tokenShortcode?: string;
   description?: string;
   accountCanisterId?: string;
   metadata?: Record<string, any>;
@@ -597,6 +608,7 @@ export interface PaymentIntent {
   id: string;
   amount: string;
   ledgerCanisterId: string;
+  tokenShortcode?: string | null;
   status: 'requires_payment' | 'processing' | 'succeeded' | 'failed' | 'canceled';
   metadata?: Record<string, any>;
   createdAt: string;

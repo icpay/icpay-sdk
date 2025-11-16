@@ -911,12 +911,13 @@ export class Icpay {
     this.emitMethodStart('createPayment', { request: { ...request, amount: typeof request.amount === 'string' ? request.amount : String(request.amount) } });
     try {
       debugLog(this.config.debug || false, 'createPayment start', { request });
-      // Resolve ledgerCanisterId from symbol if needed
+      // Resolve ledgerCanisterId from symbol if needed (legacy). If tokenShortcode provided, no resolution required.
       let ledgerCanisterId = request.ledgerCanisterId;
-      if (!ledgerCanisterId && !(request as any).symbol) {
+      const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Either ledgerCanisterId or symbol must be provided',
+          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated).',
           details: { request }
         });
         this.emitMethodError('createPayment', err);
@@ -970,13 +971,17 @@ export class Icpay {
         const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
         const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
           amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
-          symbol: (request as any).symbol,
-          ledgerCanisterId,
+          // Prefer tokenShortcode if provided
+          tokenShortcode: tokenShortcode || undefined,
+          // Legacy fields for backwards compatibility
+          symbol: tokenShortcode ? undefined : (request as any).symbol,
+          ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
           description: (request as any).description,
           expectedSenderPrincipal,
           metadata: request.metadata || {},
           amountUsd: (request as any).amountUsd,
-          chainId: (request as any).chainId,
+          // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
+          chainId: tokenShortcode ? undefined : (request as any).chainId,
           onrampPayment: onramp || undefined,
           widgetParams: request.widgetParams || undefined,
         });
@@ -1343,7 +1348,7 @@ export class Icpay {
   /**
    * Public: Get balances for an external wallet (IC principal or EVM address) using publishable key
    */
-  async getExternalWalletBalances(params: { network: 'evm' | 'ic'; address?: string; principal?: string; chainId?: string; amountUsd?: number; amount?: string; chainShortcodes?: string[]; ledgerShortcodes?: string[] }): Promise<AllLedgerBalances> {
+  async getExternalWalletBalances(params: { network: 'evm' | 'ic'; address?: string; principal?: string; chainId?: string; amountUsd?: number; amount?: string; chainShortcodes?: string[]; tokenShortcodes?: string[] }): Promise<AllLedgerBalances> {
     this.emitMethodStart('getExternalWalletBalances', { params });
     try {
       const search = new URLSearchParams();
@@ -1354,13 +1359,14 @@ export class Icpay {
       if (typeof params.amountUsd === 'number' && isFinite(params.amountUsd)) search.set('amountUsd', String(params.amountUsd));
       if (typeof params.amount === 'string' && params.amount) search.set('amount', params.amount);
       if (Array.isArray(params.chainShortcodes) && params.chainShortcodes.length > 0) search.set('chainShortcodes', params.chainShortcodes.join(','));
-      if (Array.isArray(params.ledgerShortcodes) && params.ledgerShortcodes.length > 0) search.set('ledgerShortcodes', params.ledgerShortcodes.join(','));
+      if (Array.isArray(params.tokenShortcodes) && params.tokenShortcodes.length > 0) search.set('tokenShortcodes', params.tokenShortcodes.join(','));
       const response: any = await this.publicApiClient.get(`/sdk/public/wallet/external-balances?${search.toString()}`);
       const result: AllLedgerBalances = {
         balances: (response?.balances || []).map((balance: any) => ({
           ledgerId: balance.ledgerId,
           ledgerName: balance.ledgerName,
           ledgerSymbol: balance.ledgerSymbol,
+          tokenShortcode: balance?.shortcode ?? null,
           canisterId: balance.canisterId,
           eip3009Version: balance?.eip3009Version ?? null,
           x402Accepts: balance?.x402Accepts != null ? Boolean(balance.x402Accepts) : undefined,
@@ -1565,31 +1571,30 @@ export class Icpay {
       // Convert usdAmount to number if it's a string
       const usdAmount = typeof request.usdAmount === 'string' ? parseFloat(request.usdAmount) : request.usdAmount;
 
-      // Resolve ledgerCanisterId from symbol if needed
+      // If tokenShortcode provided, skip canister resolution; otherwise resolve from symbol if needed
+      const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
       let ledgerCanisterId = request.ledgerCanisterId;
-      if (!ledgerCanisterId && (request as any).symbol) {
-        ledgerCanisterId = await this.getLedgerCanisterIdBySymbol((request as any).symbol as string);
-      }
-      if (!ledgerCanisterId) {
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Either ledgerCanisterId or symbol must be provided',
+          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated).',
           details: { request }
         });
-        this.emitMethodError('createPaymentUsd', err);
+        this.emitMethodError('createPayment', err);
         throw err;
       }
 
       const createTransactionRequest: CreateTransactionRequest = {
-        ledgerCanisterId,
-        symbol: (request as any).symbol,
+        ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
+        symbol: tokenShortcode ? undefined : (request as any).symbol,
+        tokenShortcode,
         amountUsd: usdAmount,
         description: (request as any).description,
         accountCanisterId: request.accountCanisterId,
         metadata: request.metadata,
         onrampPayment: request.onrampPayment,
         widgetParams: request.widgetParams,
-        chainId: (request as any).chainId,
+        chainId: tokenShortcode ? undefined : (request as any).chainId,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
@@ -1622,16 +1627,19 @@ export class Icpay {
       // For X402, the backend will resolve ledger/symbol as needed from the intent.
       // We forward both amountUsd and amount (if provided), and do not resolve canister here.
       const ledgerCanisterId = request.ledgerCanisterId || '';
+      const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
 
       // Hit X402 endpoint
       const body: any = {
         amount: (request as any).amount,
         amountUsd: usdAmount,
-        symbol: (request as any).symbol,
-        ledgerCanisterId,
+        // Prefer tokenShortcode; keep legacy fields if not provided
+        tokenShortcode: tokenShortcode || undefined,
+        symbol: tokenShortcode ? undefined : (request as any).symbol,
+        ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
         description: (request as any).description,
         metadata: request.metadata,
-        chainId: (request as any).chainId,
+        chainId: tokenShortcode ? undefined : (request as any).chainId,
         x402: true,
       };
 
