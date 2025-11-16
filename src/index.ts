@@ -1366,7 +1366,7 @@ export class Icpay {
           ledgerId: balance.ledgerId,
           ledgerName: balance.ledgerName,
           ledgerSymbol: balance.ledgerSymbol,
-          tokenShortcode: balance?.shortcode ?? null,
+          tokenShortcode: (balance?.tokenShortcode ?? balance?.shortcode) ?? null,
           canisterId: balance.canisterId,
           eip3009Version: balance?.eip3009Version ?? null,
           x402Accepts: balance?.x402Accepts != null ? Boolean(balance.x402Accepts) : undefined,
