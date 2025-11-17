@@ -1559,7 +1559,7 @@ export class Icpay {
         }
         if (!chainId) {
           throw new IcpayError({
-            code: 'CHAIN_ID_REQUIRED',
+            code: ICPAY_ERROR_CODES.INVALID_CONFIG,
             message: 'chainId is required when querying native token (0x000…000). Prefer tokenShortcode in new flows.',
           });
         }
