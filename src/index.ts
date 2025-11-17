@@ -500,6 +500,19 @@ export class Icpay {
       toPrincipal = this.icpayCanisterId;
     }
 
+    this.icpayCanisterId = toPrincipal;
+
+    // Ensure Plug has whitelisted the target application canister before initiating transfer
+    try {
+      const isBrowser = typeof window !== 'undefined';
+      const appCanisterId = (typeof toPrincipal === 'string' && toPrincipal.trim().length > 0) ? toPrincipal : null;
+      if (isBrowser && appCanisterId && (window as any)?.ic?.plug?.requestConnect) {
+        await (window as any).ic.plug.requestConnect({ host, whitelist: [appCanisterId] });
+      }
+    } catch {
+      // Non-fatal; continue even if whitelist step fails (wallet may already trust canister)
+    }
+
     let transferResult;
     try {
       // ICP Ledger: use ICRC-1 transfer (ICP ledger supports ICRC-1)
@@ -573,29 +586,34 @@ export class Icpay {
     debugLog(this.config.debug || false, 'transfer result', { blockIndex });
 
     // First, notify the canister about the ledger transaction (best-effort)
-    let canisterTransactionId: number;
+    let canisterTransactionId: number | undefined;
     try {
-      debugLog(this.config.debug || false, 'notifying canister about ledger tx');
+      debugLog(this.config.debug || false, 'notifying canister about ledger tx', { icpayCanisterId: this.icpayCanisterId, ledgerCanisterId, blockIndex });
       const notifyRes: any = await this.notifyLedgerTransaction(
         this.icpayCanisterId!,
         ledgerCanisterId!,
         BigInt(blockIndex)
       );
       if (typeof notifyRes === 'string') {
-        canisterTransactionId = parseInt(notifyRes, 10);
+        const parsed = parseInt(notifyRes, 10);
+        canisterTransactionId = Number.isFinite(parsed) ? parsed : undefined;
+      } else if (notifyRes && typeof notifyRes.id !== 'undefined') {
+        const parsed = parseInt(String((notifyRes as any).id), 10);
+        canisterTransactionId = Number.isFinite(parsed) ? parsed : undefined;
       } else {
-        canisterTransactionId = parseInt(notifyRes.id, 10);
+        canisterTransactionId = undefined;
       }
       debugLog(this.config.debug || false, 'canister notified', { canisterTransactionId });
     } catch (notifyError) {
-      canisterTransactionId = parseInt(blockIndex, 10);
-      debugLog(this.config.debug || false, 'notify failed, using blockIndex as tx id', { canisterTransactionId });
+      // Do not fall back to ledger block index as canister tx id; let API resolve by intent id
+      canisterTransactionId = undefined;
+      debugLog(this.config.debug || false, 'notify failed; proceeding without canister tx id', { error: (notifyError as any)?.message });
     }
 
     // Durable wait until API returns terminal status (completed/mismatched/failed/canceled)
     const finalResponse = await this.awaitIntentTerminal({
       paymentIntentId: paymentIntentId!,
-      canisterTransactionId: canisterTransactionId?.toString(),
+      canisterTransactionId: (typeof canisterTransactionId === 'number' && Number.isFinite(canisterTransactionId)) ? String(canisterTransactionId) : undefined,
       ledgerCanisterId: ledgerCanisterId!,
       amount: amount.toString(),
       metadata: metadata ?? request.metadata,
@@ -997,6 +1015,10 @@ export class Icpay {
         const rpcChainId = intentResp?.paymentIntent?.rpcChainId || null;
         const functionSelectors = intentResp?.paymentIntent?.functionSelectors || null;
         accountCanisterId = intentResp?.paymentIntent?.accountCanisterId || null;
+        // Backfill ledgerCanisterId from intent if not provided in request (tokenShortcode flow)
+        if (!ledgerCanisterId && intentResp?.paymentIntent?.ledgerCanisterId) {
+          ledgerCanisterId = intentResp.paymentIntent.ledgerCanisterId;
+        }
         debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal, resolvedAmountStr });
         // Emit transaction created event
         if (paymentIntentId) {
@@ -1014,6 +1036,7 @@ export class Icpay {
         (request as any).__chainName = chainNameFromIntent;
         (request as any).__functionSelectors = functionSelectors;
         (request as any).__rpcChainId = rpcChainId;
+
       } catch (e) {
         // Do not proceed without a payment intent
         const err = new IcpayError({
@@ -1207,6 +1230,7 @@ export class Icpay {
         const agent = new HttpAgent({ host: this.icHost });
         const actor = Actor.createActor(icpayIdl, { agent, canisterId });
         result = await (actor as any).notify_ledger_transaction({
+          // Canister expects text for ledger_canister_id
           ledger_canister_id: ledgerCanisterId,
           block_index: blockIndex
         });
