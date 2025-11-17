@@ -1546,10 +1546,27 @@ export class Icpay {
   /**
    * Get detailed ledger information including price data (public method)
    */
-  async getLedgerInfo(ledgerCanisterId: string): Promise<SdkLedger> {
-    this.emitMethodStart('getLedgerInfo', { ledgerCanisterId });
+  async getLedgerInfo(ledgerCanisterId: string, opts?: { chainId?: string | number | null }): Promise<SdkLedger> {
+    this.emitMethodStart('getLedgerInfo', { ledgerCanisterId, opts });
     try {
-      const ledger = await this.publicApiClient.get(`/sdk/public/ledgers/${ledgerCanisterId}`);
+      const isZeroAddress = typeof ledgerCanisterId === 'string' && /^0x0{40}$/i.test(ledgerCanisterId);
+      // Back-compat safety: require chainId for native token (zero address)
+      let url = `/sdk/public/ledgers/${encodeURIComponent(ledgerCanisterId)}`;
+      if (isZeroAddress) {
+        const chainId = opts?.chainId;
+        if (!chainId && this.config?.debug) {
+          debugLog(true, 'getLedgerInfo requires chainId for zero address', { ledgerCanisterId });
+        }
+        if (!chainId) {
+          throw new IcpayError({
+            code: 'CHAIN_ID_REQUIRED',
+            message: 'chainId is required when querying native token (0x000…000). Prefer tokenShortcode in new flows.',
+          });
+        }
+        const chainStr = typeof chainId === 'number' ? String(chainId) : chainId;
+        url = `${url}?chainId=${encodeURIComponent(chainStr || '')}`;
+      }
+      const ledger = await this.publicApiClient.get(url);
 
       const result: SdkLedger = {
         id: ledger.id,
