@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.12",
+  "version": "1.4.13",
   "description": "Official icpay SDK for Internet Computer payments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -25,16 +25,16 @@
   "author": "icpay",
   "license": "MIT",
   "dependencies": {
-    "@dfinity/agent": "^3.4.1",
-    "@dfinity/auth-client": "^3.4.1",
-    "@dfinity/candid": "^3.4.1",
-    "@dfinity/principal": "^3.4.1"
+    "@dfinity/agent": "^3.4.2",
+    "@dfinity/auth-client": "^3.4.2",
+    "@dfinity/candid": "^3.4.2",
+    "@dfinity/principal": "^3.4.2"
   },
   "devDependencies": {
-    "@types/node": "^24.9.2",
-    "@typescript-eslint/eslint-plugin": "^8.46.2",
-    "@typescript-eslint/parser": "^8.46.2",
-    "eslint": "^9.38.0",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "eslint": "^9.39.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3"
   },
