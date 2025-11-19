@@ -325,6 +325,12 @@ export interface LedgerPublic {
   shortcode?: string | null;
   canisterId: string;
   chainId?: string; // backend chain UUID
+  // Enriched chain fields
+  chainName?: string | null;
+  chainShortcode?: string | null;
+  chainType?: string | null; // e.g., 'ic' | 'evm'
+  nativeSymbol?: string | null;
+  rpcChainId?: string | null; // true chain id as string
   decimals: number;
   logoUrl: string | null;
   verified: boolean;
@@ -374,19 +380,22 @@ export interface SdkLedger {
   name: string;
   symbol: string;
   chainId?: string; // backend chain UUID
+  // Enriched chain fields
+  chainName?: string | null;
+  chainShortcode?: string | null;
+  chainType?: string | null; // e.g., 'ic' | 'evm'
+  nativeSymbol?: string | null;
+  rpcChainId?: string | null; // true chain id as string
   shortcode?: string | null;
   canisterId: string;
-  standard: LedgerStandard;
   decimals: number;
   logoUrl: string | null;
   verified: boolean;
   fee: string | null;
   network: LedgerNetwork;
   description: string | null;
-  lastBlockIndex: string | null;
   coingeckoId: string | null;
   currentPrice: number | null;
-  priceFetchMethod: PriceFetchMethod | null;
   lastPriceUpdate: string | null;
   createdAt: string;
   updatedAt: string;
