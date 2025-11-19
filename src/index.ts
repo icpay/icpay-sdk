@@ -430,7 +430,7 @@ export class Icpay {
           amount: params.resolvedAmountStr || params.amount.toString(),
           recipientCanister: params.ledgerCanisterId!,
           timestamp: new Date(),
-          metadata: { paymentIntentId: params.paymentIntentId, onramp: params.onrampData || true },
+          metadata: { icpay_payment_intent_id: params.paymentIntentId, icpay_onramp: params.onrampData || true },
         } as any;
       default:
         throw new IcpayError({
@@ -787,7 +787,7 @@ export class Icpay {
       transactionId: txHash,
       ledgerCanisterId: params.ledgerCanisterId!,
       amount: params.amount.toString(),
-      metadata: { ...(params.metadata || {}), evmTxHash: txHash },
+      metadata: { ...(params.metadata || {}), icpay_evm_tx_hash: txHash },
     });
     return finalResponse;
   }
@@ -1705,7 +1705,7 @@ export class Icpay {
           amount: (resp?.paymentIntent?.amount || resp?.amount || request.usdAmount)?.toString?.() || String(request.usdAmount),
           recipientCanister: ledgerCanisterId,
           timestamp: new Date(),
-          metadata: { ...(request.metadata || {}), x402: true },
+          metadata: { ...(request.metadata || {}), icpay_x402: true },
           payment: resp,
         } as any;
         this.emitMethodSuccess('createPaymentX402Usd', normalized);
@@ -1762,7 +1762,7 @@ export class Icpay {
                   amount: amountStr,
                   recipientCanister: ledgerCanisterId,
                   timestamp: new Date(),
-                  metadata: { ...(request.metadata || {}), x402: true },
+                  metadata: { ...(request.metadata || {}), icpay_x402: true },
                   payment: settleResp || null,
                 } as any;
                 // If x402 failed due to minimal limits, emit failure and fall back to normal flow
@@ -1795,7 +1795,7 @@ export class Icpay {
                   paymentIntentId,
                   ledgerCanisterId: ledgerCanisterId,
                   amount: amountStr,
-                  metadata: { ...(request.metadata || {}), x402: true },
+                  metadata: { ...(request.metadata || {}), icpay_x402: true },
                 });
                 this.emitMethodSuccess('createPaymentX402Usd', waited);
                 return waited;
@@ -1812,7 +1812,7 @@ export class Icpay {
               paymentIntentId,
               ledgerCanisterId: ledgerCanisterId,
               amount: amountStr,
-              metadata: { ...(request.metadata || {}), x402: true },
+              metadata: { ...(request.metadata || {}), icpay_x402: true },
             });
             this.emitMethodSuccess('createPaymentX402Usd', finalResponse);
             return finalResponse;
@@ -1824,7 +1824,7 @@ export class Icpay {
             amount: (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0'),
             recipientCanister: ledgerCanisterId || null,
             timestamp: new Date(),
-            metadata: { ...(request.metadata || {}), x402: true },
+          metadata: { ...(request.metadata || {}), icpay_x402: true },
             payment: null,
           } as any;
           this.emitMethodSuccess('createPaymentX402Usd', pending);
@@ -1941,7 +1941,7 @@ export class Icpay {
         const resp = await this.performNotifyPaymentIntent({
           paymentIntentId: params.paymentIntentId,
           canisterTransactionId: params.canisterTransactionId,
-          transactionId: params.transactionId || (params?.metadata?.evmTxHash ? String(params.metadata.evmTxHash) : undefined),
+          transactionId: params.transactionId || (params?.metadata?.icpay_evm_tx_hash ? String(params.metadata.icpay_evm_tx_hash) : undefined),
           maxAttempts: 1,
           delayMs: 0,
         });
