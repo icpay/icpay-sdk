@@ -269,6 +269,22 @@ export class Icpay {
       throw error;
     }
   }
+
+  /**
+   * Execute an ATXP request after payment (public).
+   */
+  async executeAtxpRequest(params: { requestId: string }): Promise<{ ok: boolean; result?: any }> {
+    this.emitMethodStart('executeAtxpRequest', { requestId: params.requestId });
+    try {
+      const endpoint = `/sdk/public/atxp/requests/${encodeURIComponent(params.requestId)}/execute`;
+      const resp = await this.publicApiClient.post(endpoint, {});
+      this.emitMethodSuccess('executeAtxpRequest', { ok: resp?.ok });
+      return resp;
+    } catch (error) {
+      this.emitMethodError('executeAtxpRequest', error);
+      throw error;
+    }
+  }
   /**
    * Get verified ledgers (public method)
    */
