@@ -212,6 +212,64 @@ export class Icpay {
   }
 
   /**
+   * Quote an ATXP request (public).
+   */
+  async quoteAtxpRequest(params: {
+    toolType: string;
+    params: any;
+    metadata?: Record<string, unknown>;
+    chatHash?: string;
+  }): Promise<{
+    ok: boolean;
+    requestId: string;
+    totalAmount: string | null;
+    feeBreakdown: { platformPercentage: number; accountAtxpFeeBps: number };
+  }> {
+    this.emitMethodStart('quoteAtxpRequest', { hasParams: !!params });
+    try {
+      const resp = await this.publicApiClient.post('/sdk/public/atxp/quote', {
+        toolType: params.toolType,
+        params: params.params,
+        metadata: params.metadata,
+        chatHash: params.chatHash,
+      });
+      this.emitMethodSuccess('quoteAtxpRequest', { requestId: resp?.requestId, totalAmount: resp?.totalAmount });
+      return resp;
+    } catch (error) {
+      this.emitMethodError('quoteAtxpRequest', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create payment intent for ATXP request (public).
+   */
+  async payAtxpRequest(params: {
+    requestId: string;
+    tokenShortcode?: string;
+    amount: string;
+    description?: string;
+  }): Promise<{
+    ok: boolean;
+    paymentIntentId: string;
+    paymentIntent: any;
+  }> {
+    this.emitMethodStart('payAtxpRequest', { requestId: params.requestId });
+    try {
+      const endpoint = `/sdk/public/atxp/requests/${encodeURIComponent(params.requestId)}/payment-intents`;
+      const resp = await this.publicApiClient.post(endpoint, {
+        tokenShortcode: params.tokenShortcode,
+        amount: params.amount,
+        description: params.description,
+      });
+      this.emitMethodSuccess('payAtxpRequest', { paymentIntentId: resp?.paymentIntentId });
+      return resp;
+    } catch (error) {
+      this.emitMethodError('payAtxpRequest', error);
+      throw error;
+    }
+  }
+  /**
    * Get verified ledgers (public method)
    */
   async getVerifiedLedgers(): Promise<LedgerPublic[]> {
