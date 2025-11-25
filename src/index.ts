@@ -1097,22 +1097,35 @@ export class Icpay {
         }
 
         const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
-        const intentResp: any = await this.publicApiClient.post('/sdk/public/payments/intents', {
-          amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
-          // Prefer tokenShortcode if provided
-          tokenShortcode: tokenShortcode || undefined,
-          // Legacy fields for backwards compatibility
-          symbol: tokenShortcode ? undefined : (request as any).symbol,
-          ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
-          description: (request as any).description,
-          expectedSenderPrincipal,
-          metadata: request.metadata || {},
-          amountUsd: (request as any).amountUsd,
-          // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
-          chainId: tokenShortcode ? undefined : (request as any).chainId,
-          onrampPayment: onramp || undefined,
-          widgetParams: request.widgetParams || undefined,
-        });
+        const meta: any = request?.metadata || {};
+        const isAtxp = Boolean(meta?.icpay_atxp_request) && typeof (meta?.atxp_request_id) === 'string';
+        let intentResp: any;
+        if (isAtxp) {
+          // Route ATXP intents to the ATXP endpoint so they link to the request
+          const atxpRequestId = String(meta.atxp_request_id);
+          const endpoint = `/sdk/public/atxp/requests/${encodeURIComponent(atxpRequestId)}/payment-intents`;
+          intentResp = await this.publicApiClient.post(endpoint, {
+            tokenShortcode: tokenShortcode || undefined,
+            description: (request as any).description,
+          });
+        } else {
+          intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
+            amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
+            // Prefer tokenShortcode if provided
+            tokenShortcode: tokenShortcode || undefined,
+            // Legacy fields for backwards compatibility
+            symbol: tokenShortcode ? undefined : (request as any).symbol,
+            ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
+            description: (request as any).description,
+            expectedSenderPrincipal,
+            metadata: request.metadata || {},
+            amountUsd: (request as any).amountUsd,
+            // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
+            chainId: tokenShortcode ? undefined : (request as any).chainId,
+            onrampPayment: onramp || undefined,
+            widgetParams: request.widgetParams || undefined,
+          });
+        }
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
         resolvedAmountStr = intentResp?.paymentIntent?.amount || resolvedAmountStr;
