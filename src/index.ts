@@ -103,6 +103,42 @@ export class Icpay {
     });
   }
 
+  /**
+   * Notify ICPay to check status of a payment intent (public).
+   */
+  async notifyPayment(params: {
+    paymentIntentId: string;
+    canisterTxId?: number;
+    transactionId?: string;
+    orderId?: string;
+  }): Promise<{
+    paymentId: string | null;
+    paymentIntentId: string | null;
+    status: string;
+    canisterTxId: number | null;
+    transactionId: string | null;
+    transactionSplitId: string | null;
+    ledgerTxId: string | null;
+    accountCanisterId: number | null;
+    basePaymentAccountId: string | null;
+    paymentIntent: any;
+    payment: any;
+  }> {
+    this.emitMethodStart('notifyPayment', { paymentIntentId: params.paymentIntentId });
+    try {
+      const resp = await this.publicApiClient.post('/sdk/public/payments/notify', {
+        paymentIntentId: params.paymentIntentId,
+        canisterTxId: params.canisterTxId,
+        transactionId: params.transactionId,
+        orderId: params.orderId,
+      });
+      this.emitMethodSuccess('notifyPayment', { status: resp?.status, paymentIntentId: resp?.paymentIntentId });
+      return resp;
+    } catch (error) {
+      this.emitMethodError('notifyPayment', error);
+      throw error;
+    }
+  }
   // ===== Event API (no Lit required) =====
   on(type: IcpayEventName | string, listener: (detail: any) => void): () => void {
     return this.events.on(type, listener);
