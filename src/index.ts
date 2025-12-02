@@ -805,8 +805,8 @@ export class Icpay {
     const apiSelectors = (params.request as any).__functionSelectors || {};
     const selector = {
       // API provides the overloaded signatures under these names
-      payNative: apiSelectors.payNative || null,   // payNative(bytes32,uint64,uint256)
-      payERC20: apiSelectors.payERC20 || null,     // payERC20(bytes32,uint64,address,uint256,uint256)
+      payNative: apiSelectors.payNative || '0x4e47ff88',   // payNative(bytes32,uint64,uint256)
+      payERC20: apiSelectors.payERC20 || '0x87b9fed2',     // payERC20(bytes32,uint64,address,uint256,uint256)
     } as const;
     // Build EVM id bytes32 using shared helper
     const accountIdNum = BigInt(params.accountCanisterId || 0);
