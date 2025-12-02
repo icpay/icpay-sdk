@@ -804,8 +804,9 @@ export class Icpay {
     // Prefer selectors from API; otherwise fallback to constants provided by backend
     const apiSelectors = (params.request as any).__functionSelectors || {};
     const selector = {
-      payNative: apiSelectors.payNative || '0x320ca36d',
-      payERC20: apiSelectors.payERC20 || '0x1d8be466',
+      // API provides the overloaded signatures under these names
+      payNative: apiSelectors.payNative || null,   // payNative(bytes32,uint64,uint256)
+      payERC20: apiSelectors.payERC20 || null,     // payERC20(bytes32,uint64,address,uint256,uint256)
     } as const;
     // Build EVM id bytes32 using shared helper
     const accountIdNum = BigInt(params.accountCanisterId || 0);
@@ -856,7 +857,13 @@ export class Icpay {
       debugLog(this.config.debug || false, 'evm from account', { owner });
 
       if (isNative) {
-        const data = selector.payNative + idHex + toUint64(accountIdNum);
+        const externalCostStr = (params.request as any)?.__externalCostAmount;
+        const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
+        const extSel = selector.payNative;
+        if (!extSel) {
+          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payNative overload selector from API; update API/chain metadata.' });
+        }
+        const data = extSel + idHex + toUint64(accountIdNum) + toUint256(externalCost);
         debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: data.length, value: amountHex });
         txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data, value: amountHex }] });
       } else {
@@ -877,7 +884,13 @@ export class Icpay {
             await waitForReceipt(approveTx, 90, 1000);
           }
         }
-        const data = selector.payERC20 + idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount);
+        const externalCostStr = (params.request as any)?.__externalCostAmount;
+        const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
+        const extSel = selector.payERC20;
+        if (!extSel) {
+          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payERC20 overload selector from API; update API/chain metadata.' });
+        }
+        const data = extSel + idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount) + toUint256(externalCost);
         debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: data.length });
         txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data }] });
       }
@@ -1137,6 +1150,7 @@ export class Icpay {
         const chainNameFromIntent = intentResp?.paymentIntent?.chainName || null;
         const rpcChainId = intentResp?.paymentIntent?.rpcChainId || null;
         const functionSelectors = intentResp?.paymentIntent?.functionSelectors || null;
+        const externalCostAmount = intentResp?.paymentIntent?.externalCostAmount || null;
         accountCanisterId = intentResp?.paymentIntent?.accountCanisterId || null;
         // Backfill ledgerCanisterId from intent if not provided in request (tokenShortcode flow)
         if (!ledgerCanisterId && intentResp?.paymentIntent?.ledgerCanisterId) {
@@ -1159,6 +1173,7 @@ export class Icpay {
         (request as any).__chainName = chainNameFromIntent;
         (request as any).__functionSelectors = functionSelectors;
         (request as any).__rpcChainId = rpcChainId;
+        (request as any).__externalCostAmount = externalCostAmount;
 
       } catch (e) {
         // Do not proceed without a payment intent
