@@ -616,7 +616,10 @@ export class Icpay {
     try {
       const isBrowser = typeof window !== 'undefined';
       const appCanisterId = (typeof toPrincipal === 'string' && toPrincipal.trim().length > 0) ? toPrincipal : null;
-      if (isBrowser && appCanisterId && (window as any)?.ic?.plug?.requestConnect) {
+      // Only attempt Plug whitelist when NOT using a provided actorProvider.
+      // If actorProvider is present (e.g., Oisy SignerAgent), we must not trigger Plug.
+      const shouldWhitelistPlug = (!this.actorProvider) && isBrowser && appCanisterId && (window as any)?.ic?.plug?.requestConnect;
+      if (shouldWhitelistPlug) {
         await (window as any).ic.plug.requestConnect({ host, whitelist: [appCanisterId] });
       }
     } catch {
