@@ -522,11 +522,7 @@ export class Icpay {
       case 'ethereum':
         return await this.processEvmPayment(params);
       case 'solana':
-        throw new IcpayError({
-          code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Solana payments are not implemented yet',
-          details: { chainType: params.chainType, chainId: params.chainId }
-        });
+        return await this.processSolanaPayment(params);
       case 'sui':
         throw new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
@@ -730,6 +726,133 @@ export class Icpay {
       ledgerCanisterId: ledgerCanisterId!,
       amount: amount.toString(),
       metadata: metadata ?? request.metadata,
+    });
+    return finalResponse;
+  }
+
+  private async processSolanaPayment(params: {
+    chainId?: string | number;
+    ledgerCanisterId?: string; // For Solana: SPL mint address (or empty/native)
+    contractAddress?: string | null; // Solana program ID (icpay program)
+    accountCanisterId?: string;
+    amount: bigint; // smallest unit
+    memo?: Uint8Array;
+    paymentIntentId: string;
+    request: CreateTransactionRequest;
+    metadata?: any;
+    rpcUrlPublic?: string | null;
+    chainName?: string | null;
+    rpcChainId?: string | number | null; // unused
+    paymentIntentCode?: number | null;
+  }): Promise<TransactionResponse> {
+    if (!params.contractAddress) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'Missing Solana program address in payment intent',
+      });
+    }
+    const w: any = (globalThis as any)?.window || (globalThis as any);
+    const sol = (this.config as any)?.solanaProvider || w?.solana;
+    if (!sol) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE,
+        message: 'Solana provider not available (window.solana)',
+      });
+    }
+    // Ensure connected & resolve payer pubkey
+    let payerKey: string | null = null;
+    try {
+      if (!sol.publicKey) {
+        await (sol.connect ? sol.connect() : sol.request?.({ method: 'connect' }));
+      }
+      const pk = sol.publicKey || sol?.wallet?.publicKey;
+      payerKey = pk ? String(pk) : null;
+    } catch {}
+    if (!payerKey) {
+      throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
+    }
+    // If API already provided a prebuilt unsigned transaction, prefer it to avoid extra roundtrip
+    const prebuiltBase64: string | undefined = (params.request as any)?.__transactionBase64 || undefined;
+    if (prebuiltBase64 && typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
+      let signature: string;
+      try {
+        if (!sol?.request) throw new Error('Unsupported Solana wallet interface (request)');
+        signature = await sol.request({
+          method: 'signAndSendTransaction',
+          params: { message: prebuiltBase64 },
+        });
+        if (!signature) {
+          throw new Error('Missing Solana transaction signature');
+        }
+      } catch (e: any) {
+        try { debugLog(this.config.debug || false, 'solana tx error (prebuilt)', { message: e?.message }); } catch {}
+        throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
+      }
+      try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+      try {
+        await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
+      } catch {}
+      const finalResponse = await this.awaitIntentTerminal({
+        paymentIntentId: params.paymentIntentId,
+        transactionId: signature,
+        ledgerCanisterId: params.ledgerCanisterId!,
+        amount: params.amount.toString(),
+        metadata: { ...(params.metadata || {}), icpay_solana_tx_sig: signature },
+      });
+      return finalResponse;
+    }
+    // Otherwise, ask API/services to build an unsigned transaction (base64) for this intent
+    const externalCostStr = (params.request as any)?.__externalCostAmount;
+    const body: any = {
+      paymentIntentId: params.paymentIntentId,
+      payer: payerKey,
+      programId: params.contractAddress,
+      mint: params.ledgerCanisterId || null,
+      amount: params.amount.toString(),
+      accountCanisterId: params.accountCanisterId,
+      paymentIntentCode: params.paymentIntentCode,
+      externalCostAmount: externalCostStr != null && externalCostStr !== '' ? String(externalCostStr) : undefined,
+      rpcUrlPublic: params.rpcUrlPublic || undefined,
+    };
+    let txBase64: string = '';
+    try {
+      // Endpoint implemented in icpay-api -> icpay-services
+      const resp = await this.publicApiClient.post('/sdk/public/payments/solana/build', body);
+      txBase64 = (resp?.transactionBase64 || resp?.transaction || resp?.message || '').toString();
+      if (!txBase64) {
+        throw new Error('API did not return a Solana transaction');
+      }
+    } catch (e: any) {
+      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Failed to build Solana transaction', details: e });
+    }
+
+    // Ask wallet to sign and send using base64 message (no web3.js needed)
+    let signature: string;
+    try {
+      if (!sol?.request) throw new Error('Unsupported Solana wallet interface (request)');
+      signature = await sol.request({
+        method: 'signAndSendTransaction',
+        params: { message: txBase64 },
+      });
+      if (!signature) {
+        throw new Error('Missing Solana transaction signature');
+      }
+    } catch (e: any) {
+      try { debugLog(this.config.debug || false, 'solana tx error', { message: e?.message }); } catch {}
+      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
+    }
+
+    // Notify API with signature and wait for terminal status
+    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+    try {
+      await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
+    } catch {}
+    const finalResponse = await this.awaitIntentTerminal({
+      paymentIntentId: params.paymentIntentId,
+      transactionId: signature,
+      ledgerCanisterId: params.ledgerCanisterId!,
+      amount: params.amount.toString(),
+      metadata: { ...(params.metadata || {}), icpay_solana_tx_sig: signature },
     });
     return finalResponse;
   }
@@ -1154,6 +1277,7 @@ export class Icpay {
         const rpcChainId = intentResp?.paymentIntent?.rpcChainId || null;
         const functionSelectors = intentResp?.paymentIntent?.functionSelectors || null;
         const externalCostAmount = intentResp?.paymentIntent?.externalCostAmount || null;
+        const transactionBase64 = intentResp?.paymentIntent?.transactionBase64 || null;
         accountCanisterId = intentResp?.paymentIntent?.accountCanisterId || null;
         // Backfill ledgerCanisterId from intent if not provided in request (tokenShortcode flow)
         if (!ledgerCanisterId && intentResp?.paymentIntent?.ledgerCanisterId) {
@@ -1177,6 +1301,7 @@ export class Icpay {
         (request as any).__functionSelectors = functionSelectors;
         (request as any).__rpcChainId = rpcChainId;
         (request as any).__externalCostAmount = externalCostAmount;
+        (request as any).__transactionBase64 = transactionBase64;
 
       } catch (e) {
         // Do not proceed without a payment intent

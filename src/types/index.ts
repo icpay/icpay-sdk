@@ -17,6 +17,11 @@ export interface IcpayConfig {
    */
   evmProvider?: any;
   /**
+   * Optional: Selected Solana provider to use for Solana flows (signing, calls).
+   * If provided, SDK will prefer this over window.solana.
+   */
+  solanaProvider?: any;
+  /**
    * Optional: Provide a function to create an actor for any canister
    * (canisterId: string, idl: any) => ActorSubclass<any>
    */
