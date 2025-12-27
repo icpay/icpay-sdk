@@ -776,11 +776,32 @@ export class Icpay {
     if (prebuiltBase64 && typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
       let signature: string;
       try {
-        if (!sol?.request) throw new Error('Unsupported Solana wallet interface (request)');
-        signature = await sol.request({
-          method: 'signAndSendTransaction',
-          params: { message: prebuiltBase64 },
-        });
+        // Try wallet-standard preferred API first (function call with bytes)
+        const toU8 = (b64: string): Uint8Array => {
+          try {
+            if (typeof atob === 'function') {
+              const bin = atob(b64);
+              const out = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+              return out;
+            }
+          } catch {}
+          const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+          return buf ? new Uint8Array(buf) : new Uint8Array();
+        };
+        if (typeof sol.signAndSendTransaction === 'function') {
+          const res = await sol.signAndSendTransaction(toU8(prebuiltBase64));
+          signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
+        } else if (sol?.request) {
+          // Try 'transaction' param first, then 'message'
+          try {
+            signature = await sol.request({ method: 'signAndSendTransaction', params: { transaction: prebuiltBase64 } });
+          } catch {
+            signature = await sol.request({ method: 'signAndSendTransaction', params: { message: prebuiltBase64 } });
+          }
+        } else {
+          throw new Error('Unsupported Solana wallet interface');
+        }
         if (!signature) {
           throw new Error('Missing Solana transaction signature');
         }
@@ -801,7 +822,7 @@ export class Icpay {
       });
       return finalResponse;
     }
-    // Otherwise, ask API/services to build an unsigned transaction (base64) for this intent
+    // Otherwise, ask API/services to build an unsigned serialized transaction (base64) for this intent
     const externalCostStr = (params.request as any)?.__externalCostAmount;
     const body: any = {
       paymentIntentId: params.paymentIntentId,
@@ -829,11 +850,36 @@ export class Icpay {
     // Ask wallet to sign and send using base64 message (no web3.js needed)
     let signature: string;
     try {
-      if (!sol?.request) throw new Error('Unsupported Solana wallet interface (request)');
-      signature = await sol.request({
-        method: 'signAndSendTransaction',
-        params: { message: txBase64 },
-      });
+      const toU8 = (b64: string): Uint8Array => {
+        try {
+          if (typeof atob === 'function') {
+            const bin = atob(b64);
+            const out = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+            return out;
+          }
+        } catch {}
+        const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+        return buf ? new Uint8Array(buf) : new Uint8Array();
+      };
+      if (typeof sol.signAndSendTransaction === 'function') {
+        const res = await sol.signAndSendTransaction(toU8(txBase64));
+        signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
+      } else if (sol?.request) {
+        try {
+          signature = await sol.request({
+            method: 'signAndSendTransaction',
+            params: { transaction: txBase64 },
+          });
+        } catch {
+          signature = await sol.request({
+            method: 'signAndSendTransaction',
+            params: { message: txBase64 },
+          });
+        }
+      } else {
+        throw new Error('Unsupported Solana wallet interface');
+      }
       if (!signature) {
         throw new Error('Missing Solana transaction signature');
       }
