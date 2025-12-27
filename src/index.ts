@@ -815,7 +815,12 @@ export class Icpay {
       let signature: string;
       try {
         if ((sol as any)?.request) {
-          const isPhantom = !!((w as any)?.phantom?.solana?.isPhantom || (sol as any)?.isPhantom);
+          // Treat as Phantom only if the selected provider itself reports isPhantom,
+          // or it is literally the same object as window.phantom.solana.
+          const isPhantom = !!(
+            (sol as any)?.isPhantom ||
+            (((w as any)?.phantom?.solana) && ((w as any).phantom.solana === (sol as any)))
+          );
           if (isPhantom) {
             // Phantom expects base58-encoded serialized message under "message"
             const msgB58 = base58Encode(u8FromBase64(prebuiltBase64));
@@ -828,6 +833,28 @@ export class Icpay {
             const r1 = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: prebuiltBase64 } });
             signature = (r1 && (r1.signature || r1)) as string;
           }
+        } else if (typeof (sol as any)?.signAndSendTransaction === 'function') {
+          // Some providers (e.g., Backpack) expose direct signAndSendTransaction without request API.
+          // Try common parameter shapes in order.
+          const msgB58 = base58Encode(u8FromBase64(prebuiltBase64));
+          let r2: any = null;
+          try {
+            debugLog(this.config.debug || false, 'solana direct call', { fn: 'signAndSendTransaction', param: 'message(base58)' });
+            r2 = await (sol as any).signAndSendTransaction({ message: msgB58 });
+          } catch {}
+          if (!r2) {
+            try {
+              debugLog(this.config.debug || false, 'solana direct call', { fn: 'signAndSendTransaction', param: 'transaction(base64)' });
+              r2 = await (sol as any).signAndSendTransaction({ transaction: prebuiltBase64 });
+            } catch {}
+          }
+          if (!r2) {
+            try {
+              debugLog(this.config.debug || false, 'solana direct call', { fn: 'signAndSendTransaction', param: 'transaction(uint8array)' });
+              r2 = await (sol as any).signAndSendTransaction(u8FromBase64(prebuiltBase64));
+            } catch {}
+          }
+          signature = (r2 && (r2.signature || r2)) as string;
         } else {
           throw new Error('Unsupported Solana wallet interface');
         }
