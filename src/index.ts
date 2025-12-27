@@ -24,6 +24,44 @@ import { debugLog } from './utils';
 import { createProtectedApi, ProtectedApi } from './protected';
 import { HttpClient } from './http';
 
+// Minimal helpers to support Phantom's base58 "message" signing without extra deps
+const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Encode(bytes: Uint8Array): string {
+  if (!bytes || bytes.length === 0) return '';
+  // Count leading zeros
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  // Convert base-256 to base-58
+  const digits: number[] = [0];
+  for (let i = zeros; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) {
+      const x = digits[j] * 256 + carry;
+      digits[j] = x % 58;
+      carry = Math.floor(x / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  // Leading zero bytes are represented by '1'
+  let out = '';
+  for (let k = 0; k < zeros; k++) out += '1';
+  for (let q = digits.length - 1; q >= 0; q--) out += B58_ALPHABET[digits[q]];
+  return out;
+}
+function u8FromBase64(b64: string): Uint8Array {
+  try {
+    const Buf = (globalThis as any).Buffer;
+    if (Buf) return new Uint8Array(Buf.from(b64, 'base64'));
+  } catch {}
+  const bin = (globalThis as any)?.atob ? (globalThis as any).atob(b64) : '';
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
 export class Icpay {
   private config: IcpayConfig;
   private wallet: IcpayWallet;
@@ -771,122 +809,48 @@ export class Icpay {
     if (!payerKey) {
       throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
     }
-    // Otherwise, ask API/services to build an unsigned serialized transaction (base64) for this intent
-    const externalCostStr = (params.request as any)?.__externalCostAmount;
-    const body: any = {
-      paymentIntentId: params.paymentIntentId,
-      payer: payerKey,
-      programId: params.contractAddress,
-      mint: params.ledgerCanisterId || null,
-      amount: params.amount.toString(),
-      accountCanisterId: params.accountCanisterId,
-      paymentIntentCode: params.paymentIntentCode,
-      externalCostAmount: externalCostStr != null && externalCostStr !== '' ? String(externalCostStr) : undefined,
-      rpcUrlPublic: params.rpcUrlPublic || undefined,
-    };
-    let txBase64: string = '';
-    try {
-      // Endpoint implemented in icpay-api -> icpay-services
-      const resp = await this.publicApiClient.post('/sdk/public/payments/solana/build', body);
-      txBase64 = (resp?.transactionBase64 || resp?.transaction || resp?.message || '').toString();
-      if (!txBase64) {
-        throw new Error('API did not return a Solana transaction');
-      }
-    } catch (e: any) {
-      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Failed to build Solana transaction', details: e });
-    }
-
-    // Ask wallet to sign and send using base64 message (no web3.js needed)
-    let signature: string;
-    try {
-      // Prefer request-based API with base64
-      if (sol?.request) {
-        try {
-          signature = await sol.request({
-            method: 'signAndSendTransaction',
-            params: { transaction: txBase64 },
-          });
-        } catch {
-          // Try base64 under "message", then base58
-          try {
-            signature = await sol.request({
-              method: 'signAndSendTransaction',
-              params: { message: txBase64 },
-            });
-          } catch {
-            const toU8 = (b64: string): Uint8Array => {
-              try {
-                if (typeof atob === 'function') {
-                  const bin = atob(b64);
-                  const out = new Uint8Array(bin.length);
-                  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-                  return out;
-                }
-              } catch {}
-              const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
-              return buf ? new Uint8Array(buf) : new Uint8Array();
-            };
-            const base58Encode = (bytes: Uint8Array): string => {
-              const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-              let x = BigInt(0);
-              for (let i = 0; i < bytes.length; i++) {
-                x = (x << 8n) + BigInt(bytes[i]);
-              }
-              let out = '';
-              while (x > 0) {
-                const mod = Number(x % 58n);
-                out = alphabet[mod] + out;
-                x = x / 58n;
-              }
-              for (let i = 0; i < bytes.length && bytes[i] === 0; i++) out = '1' + out;
-              return out || '1';
-            };
-            const b58 = base58Encode(toU8(txBase64));
-            signature = await sol.request({
-              method: 'signAndSendTransaction',
-              params: { message: b58 },
-            });
+    // If the intent already provided an unsigned transaction, use it (no extra API roundtrip)
+    const prebuiltBase64: string | undefined = (params.request as any)?.__transactionBase64;
+    if (typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
+      let signature: string;
+      try {
+        if ((sol as any)?.request) {
+          const isPhantom = !!((w as any)?.phantom?.solana?.isPhantom || (sol as any)?.isPhantom);
+          if (isPhantom) {
+            // Phantom expects base58-encoded serialized message under "message"
+            const msgB58 = base58Encode(u8FromBase64(prebuiltBase64));
+            debugLog(this.config.debug || false, 'solana phantom request', { method: 'signAndSendTransaction', param: 'message(base58)' });
+            const r = await (sol as any).request({ method: 'signAndSendTransaction', params: { message: msgB58 } });
+            signature = (r && (r.signature || r)) as string;
+          } else {
+            // Other wallets may accept base64 "transaction"
+            debugLog(this.config.debug || false, 'solana generic request', { method: 'signAndSendTransaction', param: 'transaction(base64)' });
+            const r1 = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: prebuiltBase64 } });
+            signature = (r1 && (r1.signature || r1)) as string;
           }
+        } else {
+          throw new Error('Unsupported Solana wallet interface');
         }
-      } else if (typeof sol.signAndSendTransaction === 'function') {
-        const toU8 = (b64: string): Uint8Array => {
-          try {
-            if (typeof atob === 'function') {
-              const bin = atob(b64);
-              const out = new Uint8Array(bin.length);
-              for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-              return out;
-            }
-          } catch {}
-          const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
-          return buf ? new Uint8Array(buf) : new Uint8Array();
-        };
-        const res = await sol.signAndSendTransaction(toU8(txBase64));
-        signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
-      } else {
-        throw new Error('Unsupported Solana wallet interface');
+        if (!signature) throw new Error('Missing Solana transaction signature');
+      } catch (e: any) {
+        try { debugLog(this.config.debug || false, 'solana tx error (prebuilt)', { message: e?.message }); } catch {}
+        throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
       }
-      if (!signature) {
-        throw new Error('Missing Solana transaction signature');
-      }
-    } catch (e: any) {
-      try { debugLog(this.config.debug || false, 'solana tx error', { message: e?.message }); } catch {}
-      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
+      try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+      try {
+        await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
+      } catch {}
+      const finalQuick = await this.awaitIntentTerminal({
+        paymentIntentId: params.paymentIntentId,
+        transactionId: signature,
+        ledgerCanisterId: params.ledgerCanisterId!,
+        amount: params.amount.toString(),
+        metadata: { ...(params.metadata || {}), icpay_solana_tx_sig: signature },
+      });
+      return finalQuick;
     }
-
-    // Notify API with signature and wait for terminal status
-    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
-    try {
-      await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
-    } catch {}
-    const finalResponse = await this.awaitIntentTerminal({
-      paymentIntentId: params.paymentIntentId,
-      transactionId: signature,
-      ledgerCanisterId: params.ledgerCanisterId!,
-      amount: params.amount.toString(),
-      metadata: { ...(params.metadata || {}), icpay_solana_tx_sig: signature },
-    });
-    return finalResponse;
+    // No prebuilt transaction available and builder fallback disabled
+    throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Payment intent missing transactionBase64 for Solana' });
   }
 
   private async processEvmPayment(params: {
@@ -1235,27 +1199,38 @@ export class Icpay {
       try {
         debugLog(this.config.debug || false, 'creating payment intent');
 
-        // Expected sender principal: allow override via request, fallback to connected wallet, then EVM provider
-        let expectedSenderPrincipal: string | undefined = (request as any).expectedSenderPrincipal
-          || this.connectedWallet?.owner
-          || this.connectedWallet?.principal?.toString();
-        const evm = (this.config as any)?.evmProvider || (globalThis as any)?.ethereum;
-        if (evm?.request) {
-          try {
-            const accounts: string[] = await evm.request({ method: 'eth_accounts' });
-            if (Array.isArray(accounts) && accounts[0]) {
-              const lowerAccounts = accounts.map((a: string) => String(a).toLowerCase());
-              const providedRaw = (request as any)?.expectedSenderPrincipal;
-              if (providedRaw) {
-                const provided = String(providedRaw).toLowerCase();
-                expectedSenderPrincipal = lowerAccounts.includes(provided)
-                  ? accounts[lowerAccounts.indexOf(provided)]
-                  : (expectedSenderPrincipal || accounts[0]);
-              } else if (!expectedSenderPrincipal) {
-                expectedSenderPrincipal = accounts[0];
+        // Resolve expected sender principal:
+        // Start with any value explicitly provided on the request or via connectedWallet.
+        let expectedSenderPrincipal: string | undefined =
+          (request as any).expectedSenderPrincipal ||
+          this.connectedWallet?.owner ||
+          this.connectedWallet?.principal?.toString();
+        // If none yet and a Solana provider is present (e.g., Phantom), prefer its publicKey (base58).
+        try {
+          const solProv: any = (this.config as any)?.solanaProvider || (globalThis as any)?.solana;
+          const solPk = solProv?.publicKey ? String(solProv.publicKey) : undefined;
+          if (!expectedSenderPrincipal && solPk) {
+            expectedSenderPrincipal = String(solPk);
+          }
+        } catch {}
+        // Only if still missing, fall back to EVM accounts.
+        if (!expectedSenderPrincipal) {
+          const evm = (this.config as any)?.evmProvider || (globalThis as any)?.ethereum;
+          if (evm?.request) {
+            try {
+              const accounts: string[] = await evm.request({ method: 'eth_accounts' });
+              if (Array.isArray(accounts) && accounts[0]) {
+                const lowerAccounts = accounts.map((a: string) => String(a).toLowerCase());
+                const providedRaw = (request as any)?.expectedSenderPrincipal;
+                if (providedRaw) {
+                  const provided = String(providedRaw).toLowerCase();
+                  expectedSenderPrincipal = lowerAccounts.includes(provided) ? accounts[lowerAccounts.indexOf(provided)] : accounts[0];
+                } else {
+                  expectedSenderPrincipal = accounts[0];
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          }
         }
         if (!expectedSenderPrincipal) {
           throw new IcpayError({
