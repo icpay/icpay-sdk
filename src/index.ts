@@ -773,32 +773,67 @@ export class Icpay {
     }
     // If API already provided a prebuilt unsigned transaction, prefer it to avoid extra roundtrip
     const prebuiltBase64: string | undefined = (params.request as any)?.__transactionBase64 || undefined;
-    if (prebuiltBase64 && typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
+    // Strategy: build fresh tx first to ensure recent blockhash; fall back to prebuilt if build fails
+    if (false && prebuiltBase64 && typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
       let signature: string;
       try {
-        // Try wallet-standard preferred API first (function call with bytes)
-        const toU8 = (b64: string): Uint8Array => {
-          try {
-            if (typeof atob === 'function') {
-              const bin = atob(b64);
-              const out = new Uint8Array(bin.length);
-              for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-              return out;
-            }
-          } catch {}
-          const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
-          return buf ? new Uint8Array(buf) : new Uint8Array();
-        };
-        if (typeof sol.signAndSendTransaction === 'function') {
-          const res = await sol.signAndSendTransaction(toU8(prebuiltBase64));
-          signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
-        } else if (sol?.request) {
-          // Try 'transaction' param first, then 'message'
+        // Prefer request-based API with base64 (broad wallet compatibility, including Phantom)
+        if (sol?.request) {
           try {
             signature = await sol.request({ method: 'signAndSendTransaction', params: { transaction: prebuiltBase64 } });
           } catch {
-            signature = await sol.request({ method: 'signAndSendTransaction', params: { message: prebuiltBase64 } });
+            // Try base64 under "message", then base58 as last resort
+            try {
+              signature = await sol.request({ method: 'signAndSendTransaction', params: { message: prebuiltBase64 } });
+            } catch {
+              const toU8 = (b64: string): Uint8Array => {
+                try {
+                  if (typeof atob === 'function') {
+                    const bin = atob(b64);
+                    const out = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+                    return out;
+                  }
+                } catch {}
+                const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+                return buf ? new Uint8Array(buf) : new Uint8Array();
+              };
+              const base58Encode = (bytes: Uint8Array): string => {
+                const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+                let x = BigInt(0);
+                for (let i = 0; i < bytes.length; i++) {
+                  x = (x << 8n) + BigInt(bytes[i]);
+                }
+                let out = '';
+                while (x > 0) {
+                  const mod = Number(x % 58n);
+                  out = alphabet[mod] + out;
+                  x = x / 58n;
+                }
+                // preserve leading zeros
+                for (let i = 0; i < bytes.length && bytes[i] === 0; i++) out = '1' + out;
+                return out || '1';
+              };
+              const b58 = base58Encode(toU8(prebuiltBase64));
+              signature = await sol.request({ method: 'signAndSendTransaction', params: { message: b58 } });
+            }
           }
+        } else if (typeof sol.signAndSendTransaction === 'function') {
+          // As a last resort, try passing bytes
+          const toU8 = (b64: string): Uint8Array => {
+            try {
+              if (typeof atob === 'function') {
+                const bin = atob(b64);
+                const out = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+                return out;
+              }
+            } catch {}
+            const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+            return buf ? new Uint8Array(buf) : new Uint8Array();
+          };
+          const res = await sol.signAndSendTransaction(toU8(prebuiltBase64));
+          signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
         } else {
           throw new Error('Unsupported Solana wallet interface');
         }
@@ -850,33 +885,70 @@ export class Icpay {
     // Ask wallet to sign and send using base64 message (no web3.js needed)
     let signature: string;
     try {
-      const toU8 = (b64: string): Uint8Array => {
-        try {
-          if (typeof atob === 'function') {
-            const bin = atob(b64);
-            const out = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-            return out;
-          }
-        } catch {}
-        const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
-        return buf ? new Uint8Array(buf) : new Uint8Array();
-      };
-      if (typeof sol.signAndSendTransaction === 'function') {
-        const res = await sol.signAndSendTransaction(toU8(txBase64));
-        signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
-      } else if (sol?.request) {
+      // Prefer request-based API with base64
+      if (sol?.request) {
         try {
           signature = await sol.request({
             method: 'signAndSendTransaction',
             params: { transaction: txBase64 },
           });
         } catch {
-          signature = await sol.request({
-            method: 'signAndSendTransaction',
-            params: { message: txBase64 },
-          });
+          // Try base64 under "message", then base58
+          try {
+            signature = await sol.request({
+              method: 'signAndSendTransaction',
+              params: { message: txBase64 },
+            });
+          } catch {
+            const toU8 = (b64: string): Uint8Array => {
+              try {
+                if (typeof atob === 'function') {
+                  const bin = atob(b64);
+                  const out = new Uint8Array(bin.length);
+                  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+                  return out;
+                }
+              } catch {}
+              const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+              return buf ? new Uint8Array(buf) : new Uint8Array();
+            };
+            const base58Encode = (bytes: Uint8Array): string => {
+              const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+              let x = BigInt(0);
+              for (let i = 0; i < bytes.length; i++) {
+                x = (x << 8n) + BigInt(bytes[i]);
+              }
+              let out = '';
+              while (x > 0) {
+                const mod = Number(x % 58n);
+                out = alphabet[mod] + out;
+                x = x / 58n;
+              }
+              for (let i = 0; i < bytes.length && bytes[i] === 0; i++) out = '1' + out;
+              return out || '1';
+            };
+            const b58 = base58Encode(toU8(txBase64));
+            signature = await sol.request({
+              method: 'signAndSendTransaction',
+              params: { message: b58 },
+            });
+          }
         }
+      } else if (typeof sol.signAndSendTransaction === 'function') {
+        const toU8 = (b64: string): Uint8Array => {
+          try {
+            if (typeof atob === 'function') {
+              const bin = atob(b64);
+              const out = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+              return out;
+            }
+          } catch {}
+          const buf: any = (globalThis as any).Buffer?.from(b64, 'base64');
+          return buf ? new Uint8Array(buf) : new Uint8Array();
+        };
+        const res = await sol.signAndSendTransaction(toU8(txBase64));
+        signature = (res && (res.signature || res.txid)) || (typeof res === 'string' ? res : '');
       } else {
         throw new Error('Unsupported Solana wallet interface');
       }
