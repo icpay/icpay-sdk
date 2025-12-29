@@ -1269,9 +1269,12 @@ export class Icpay {
           });
         }
 
-        const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
+      const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
         const meta: any = request?.metadata || {};
         const isAtxp = Boolean(meta?.icpay_atxp_request) && typeof (meta?.atxp_request_id) === 'string';
+      const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+      const recipientAddress = (request as any)?.recipientAddress || ZERO_ADDRESS;
+      debugLog(this.config.debug || false, 'recipientAddress resolved for intent', { recipientAddress });
         let intentResp: any;
         if (isAtxp) {
           // Route ATXP intents to the ATXP endpoint so they link to the request
@@ -1280,6 +1283,7 @@ export class Icpay {
           intentResp = await this.publicApiClient.post(endpoint, {
             tokenShortcode: tokenShortcode || undefined,
             description: (request as any).description,
+          recipientAddress,
           });
         } else {
           intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
@@ -1297,6 +1301,7 @@ export class Icpay {
             chainId: tokenShortcode ? undefined : (request as any).chainId,
             onrampPayment: onramp || undefined,
             widgetParams: request.widgetParams || undefined,
+          recipientAddress,
           });
         }
         paymentIntentId = intentResp?.paymentIntent?.id || null;
@@ -1933,6 +1938,7 @@ export class Icpay {
         onrampPayment: request.onrampPayment,
         widgetParams: request.widgetParams,
         chainId: tokenShortcode ? undefined : (request as any).chainId,
+        recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
@@ -1979,6 +1985,7 @@ export class Icpay {
         metadata: request.metadata,
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         x402: true,
+        recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
       };
 
       try {
