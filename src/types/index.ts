@@ -131,6 +131,7 @@ export interface CreateTransactionRequest {
   widgetParams?: Record<string, any>;
   amountUsd?: number | string;
   chainId?: string;
+  recipientAddress?: string;
 }
 
 export interface TransactionResponse {
@@ -615,6 +616,7 @@ export interface CreatePaymentUsdRequest {
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
   widgetParams?: Record<string, any>;
+  recipientAddress?: string;
 }
 
 // Payments types
