@@ -953,9 +953,9 @@ export class Icpay {
     // Prefer selectors from API; otherwise fallback to constants provided by backend
     const apiSelectors = (params.request as any).__functionSelectors || {};
     const selector = {
-      // API provides the overloaded signatures under these names
-      payNative: apiSelectors.payNative || '0x4e47ff88',   // payNative(bytes32,uint64,uint256)
-      payERC20: apiSelectors.payERC20 || '0x87b9fed2',     // payERC20(bytes32,uint64,address,uint256,uint256)
+      // Always use relay overloads; server maps payNative/payERC20 to relay selectors
+      payNative: apiSelectors.payNative || '0x8062dd66',   // payNative(bytes32,uint64,uint256,address)
+      payERC20: apiSelectors.payERC20 || '0xc20b92c7',     // payERC20(bytes32,uint64,address,uint256,uint256,address)
     } as const;
     // Build EVM id bytes32 using shared helper
     const accountIdNum = BigInt(params.accountCanisterId || 0);
@@ -975,6 +975,7 @@ export class Icpay {
         idHexLen: idHex?.length,
         selectorPayNative: selector.payNative,
         selectorPayERC20: selector.payERC20,
+        recipientAddress: (params.request as any)?.recipientAddress || null,
       });
     } catch {}
 
@@ -1005,15 +1006,18 @@ export class Icpay {
       if (!owner) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'EVM wallet not connected' });
       debugLog(this.config.debug || false, 'evm from account', { owner });
 
+      const ZERO = '0x0000000000000000000000000000000000000000';
+      const recipientRaw = String((params.request as any)?.recipientAddress || '').trim();
+      const recipient = /^0x[a-fA-F0-9]{40}$/.test(recipientRaw) ? recipientRaw : ZERO;
       if (isNative) {
         const externalCostStr = (params.request as any)?.__externalCostAmount;
         const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
         const extSel = selector.payNative;
         if (!extSel) {
-          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payNative overload selector from API; update API/chain metadata.' });
+          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payNative selector from API; update API/chain metadata.' });
         }
-        const data = extSel + idHex + toUint64(accountIdNum) + toUint256(externalCost);
-        debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: data.length, value: amountHex });
+        const data = extSel + idHex + toUint64(accountIdNum) + toUint256(externalCost) + toAddressPadded(recipient);
+        debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: data.length, value: amountHex, recipient });
         txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data, value: amountHex }] });
       } else {
         // Ensure allowance(owner -> spender=contractAddress)
@@ -1037,10 +1041,11 @@ export class Icpay {
         const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
         const extSel = selector.payERC20;
         if (!extSel) {
-          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payERC20 overload selector from API; update API/chain metadata.' });
+          throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payERC20 selector from API; update API/chain metadata.' });
         }
-        const data = extSel + idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount) + toUint256(externalCost);
-        debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: data.length });
+        const base = idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount) + toUint256(externalCost);
+        const data = extSel + base + toAddressPadded(recipient);
+        debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: data.length, recipient });
         txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data }] });
       }
     } catch (e: any) {
