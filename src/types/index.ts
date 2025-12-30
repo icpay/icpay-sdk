@@ -132,6 +132,11 @@ export interface CreateTransactionRequest {
   amountUsd?: number | string;
   chainId?: string;
   recipientAddress?: string;
+  recipientAddresses?: {
+    evm?: string;
+    ic?: string;
+    sol?: string;
+  };
 }
 
 export interface TransactionResponse {
@@ -617,6 +622,11 @@ export interface CreatePaymentUsdRequest {
   onrampPayment?: boolean;
   widgetParams?: Record<string, any>;
   recipientAddress?: string;
+  recipientAddresses?: {
+    evm?: string;
+    ic?: string;
+    sol?: string;
+  };
 }
 
 // Payments types
