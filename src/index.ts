@@ -1278,7 +1278,13 @@ export class Icpay {
         const meta: any = request?.metadata || {};
         const isAtxp = Boolean(meta?.icpay_atxp_request) && typeof (meta?.atxp_request_id) === 'string';
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-      const recipientAddress = (request as any)?.recipientAddress || ZERO_ADDRESS;
+      const reqAny: any = request as any;
+      const addrObj = (reqAny?.recipientAddresses) || {};
+      const candidateEvm = addrObj.evm ? addrObj.evm : undefined;
+      const candidateIC = addrObj.ic ? addrObj.ic : undefined;
+      const candidateSol = addrObj.sol ? addrObj.sol : undefined;
+      // Choose a default to persist on the intent; EVM will override to ZERO if non-hex when building tx
+      const recipientAddress = (reqAny?.recipientAddress) || candidateEvm || candidateIC || candidateSol || ZERO_ADDRESS;
       debugLog(this.config.debug || false, 'recipientAddress resolved for intent', { recipientAddress });
         let intentResp: any;
         if (isAtxp) {
