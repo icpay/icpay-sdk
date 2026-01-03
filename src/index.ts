@@ -1294,7 +1294,9 @@ export class Icpay {
           intentResp = await this.publicApiClient.post(endpoint, {
             tokenShortcode: tokenShortcode || undefined,
             description: (request as any).description,
-          recipientAddress,
+            recipientAddress,
+            recipientAddresses: (request as any)?.recipientAddresses || undefined,
+            externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
           });
         } else {
           intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
@@ -1312,7 +1314,9 @@ export class Icpay {
             chainId: tokenShortcode ? undefined : (request as any).chainId,
             onrampPayment: onramp || undefined,
             widgetParams: request.widgetParams || undefined,
-          recipientAddress,
+            recipientAddress,
+            recipientAddresses: (request as any)?.recipientAddresses || undefined,
+            externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
           });
         }
         paymentIntentId = intentResp?.paymentIntent?.id || null;
@@ -1535,7 +1539,12 @@ export class Icpay {
   /**
    * Notify canister about ledger transaction using anonymous actor (no signature required)
    */
-  async notifyLedgerTransaction(canisterId: string, ledgerCanisterId: string, blockIndex: bigint): Promise<string> {
+  async notifyLedgerTransaction(
+    canisterId: string,
+    ledgerCanisterId: string,
+    blockIndex: bigint,
+    opts?: { accountCanisterId?: number; externalCostAmount?: string | number | bigint | null; recipientPrincipal?: string | null }
+  ): Promise<string> {
     this.emitMethodStart('notifyLedgerTransaction', { canisterId, ledgerCanisterId, blockIndex: blockIndex.toString() });
     // Create anonymous actor for canister notifications (no signature required)
     // Retry on transient certificate TrustError (clock skew)
@@ -1545,11 +1554,36 @@ export class Icpay {
       try {
         const agent = new HttpAgent({ host: this.icHost });
         const actor = Actor.createActor(icpayIdl, { agent, canisterId });
-        result = await (actor as any).notify_ledger_transaction({
-          // Canister expects text for ledger_canister_id
-          ledger_canister_id: ledgerCanisterId,
-          block_index: blockIndex
-        });
+        // Prefer v2 when available and we have required inputs
+        const maybeV2 = (actor as any)?.notify_ledger_transaction_v2;
+        const haveAcct = typeof opts?.accountCanisterId === 'number' && Number.isFinite(opts.accountCanisterId);
+        if (maybeV2 && haveAcct) {
+          const externalCost = (() => {
+            if (opts?.externalCostAmount == null) return [];
+            try {
+              const v = BigInt(String(opts.externalCostAmount));
+              if (v < 0n) return [];
+              return [v];
+            } catch { return []; }
+          })();
+          const recipient = (() => {
+            const s = (opts?.recipientPrincipal || '').trim();
+            return s ? [s] : [];
+          })();
+          result = await (actor as any).notify_ledger_transaction_v2(
+            { ledger_canister_id: ledgerCanisterId, block_index: blockIndex },
+            BigInt(opts!.accountCanisterId!),
+            externalCost,
+            recipient
+          );
+        } else {
+          // Fallback to legacy notify
+          result = await (actor as any).notify_ledger_transaction({
+            // Canister expects text for ledger_canister_id
+            ledger_canister_id: ledgerCanisterId,
+            block_index: blockIndex
+          });
+        }
         break;
       } catch (e: any) {
         const msg = String(e?.message || '').toLowerCase();
