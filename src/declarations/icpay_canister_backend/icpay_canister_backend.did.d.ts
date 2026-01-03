@@ -4,9 +4,14 @@ import type { IDL } from '@dfinity/candid';
 
 export interface Account {
   'account_canister_id' : bigint,
+  'relay_fee_percentage' : [] | [number],
+  'payout_count' : [] | [number],
+  'refund_count' : [] | [number],
   'platform_fee_percentage' : number,
   'subaccount' : [] | [Uint8Array | number[]],
   'wallet_address' : string,
+  'payout_limit' : [] | [number],
+  'refund_limit' : [] | [number],
   'icp_account_identifier' : [] | [string],
   'platform_fee_fixed' : [] | [bigint],
   'is_active' : boolean,
@@ -18,6 +23,9 @@ export interface AccountRecord {
 }
 export interface AllowedLedgerInfo {
   'canister_id' : string,
+  'allowed' : boolean,
+  'minimum_amount' : bigint,
+  'minimal_platform_fee' : bigint,
   'standard' : LedgerStandard,
 }
 export interface CanisterMetrics {
@@ -141,9 +149,12 @@ export interface Transaction {
   'account_canister_id' : bigint,
   'platform_fee_amount' : bigint,
   'transfer_fee' : bigint,
+  'external_cost_amount' : [] | [bigint],
+  'kind' : [] | [number],
   'memo' : [] | [Uint8Array | number[]],
   'timestamp_to_account' : [] | [bigint],
   'notify_processing' : boolean,
+  'relay_fee_amount' : [] | [bigint],
   'source_type' : number,
   'timestamp' : bigint,
   'index_received' : [] | [bigint],
@@ -153,6 +164,7 @@ export interface Transaction {
   'splits' : Array<Split>,
   'timestamp_received' : [] | [bigint],
   'amount' : bigint,
+  'recipient_principal_id' : [] | [string],
 }
 export interface TransactionFilter {
   'from_timestamp' : [] | [bigint],
@@ -177,6 +189,10 @@ export type TransactionStatus = { 'Failed' : string } |
 export interface _SERVICE {
   'add_account' : ActorMethod<[bigint, Account], Result>,
   'add_allowed_ledger' : ActorMethod<[string, LedgerStandard], Result>,
+  'add_allowed_ledger_v2' : ActorMethod<
+    [string, LedgerStandard, boolean, bigint, bigint],
+    Result
+  >,
   'get_account' : ActorMethod<[bigint], [] | [Account]>,
   'get_account_transactions' : ActorMethod<
     [bigint, [] | [number], [] | [number]],
@@ -203,6 +219,10 @@ export interface _SERVICE {
     [LedgerTransactionNotification],
     Result_1
   >,
+  'notify_ledger_transaction_v2' : ActorMethod<
+    [LedgerTransactionNotification, bigint, [] | [bigint], [] | [string]],
+    Result_1
+  >,
   'notify_onramp_icp' : ActorMethod<
     [Uint8Array | number[], Uint8Array | number[]],
     Result_1
@@ -211,6 +231,10 @@ export interface _SERVICE {
   'remove_allowed_ledger' : ActorMethod<[string], Result>,
   'request_payout' : ActorMethod<[bigint, bigint, string, bigint], Result_2>,
   'request_refund' : ActorMethod<[bigint], Result_3>,
+  'set_allowed_ledger_config' : ActorMethod<
+    [string, LedgerStandard, boolean, bigint, bigint],
+    Result
+  >,
   'set_platform_wallet' : ActorMethod<[string], Result>,
   'update_account' : ActorMethod<[bigint, Account], Result>,
   'update_controllers' : ActorMethod<[], Result>,
