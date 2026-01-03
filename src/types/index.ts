@@ -131,6 +131,8 @@ export interface CreateTransactionRequest {
   widgetParams?: Record<string, any>;
   amountUsd?: number | string;
   chainId?: string;
+  // Optional: platform-retained extra cost in smallest unit (forwarded to intent)
+  externalCostAmount?: string | number;
   recipientAddress?: string;
   recipientAddresses?: {
     evm?: string;
@@ -621,6 +623,8 @@ export interface CreatePaymentUsdRequest {
   metadata?: Record<string, any>;
   onrampPayment?: boolean;
   widgetParams?: Record<string, any>;
+  // Optional: platform-retained extra cost in smallest unit (forwarded to intent)
+  externalCostAmount?: string | number;
   recipientAddress?: string;
   recipientAddresses?: {
     evm?: string;
