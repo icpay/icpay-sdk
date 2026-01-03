@@ -7,8 +7,22 @@ type Account = record {
   platform_fee_fixed : opt nat;
   is_active : bool;
   splits : vec SplitRule;
+  // New fields
+  refund_limit : opt nat32;
+  payout_limit : opt nat32;
+  refund_count : opt nat32;
+  payout_count : opt nat32;
+  relay_fee_percentage : opt nat16;
 };
 type AccountRecord = record { account_canister_id : nat64; account : Account };
+type AllowedLedgerInfo = record {
+  canister_id : text;
+  standard : LedgerStandard;
+  // New per-ledger configuration
+  allowed : bool;
+  minimum_amount : nat64;
+  minimal_platform_fee : nat64;
+};
 type CanisterMetrics = record {
   total_accounts : nat32;
   cycles_balance : nat64;
@@ -57,6 +71,7 @@ type Icrc21Error = variant {
 };
 type Icrc21ErrorInfo = record { description : text };
 type Icrc21Page = record { lines : vec text };
+type LedgerStandard = variant { Ck; Icp; Icrc };
 type LedgerTransactionNotification = record {
   block_index : nat64;
   ledger_canister_id : text;
@@ -75,6 +90,7 @@ type Payout = record {
   to_subaccount : opt blob;
   from_subaccount : blob;
   icp_account_identifier : opt text;
+  notify_processing : opt bool;
   timestamp_created : nat64;
   index : opt nat64;
   ledger_canister_id : text;
@@ -101,7 +117,6 @@ type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NotifyResult; Err : text };
 type Result_2 = variant { Ok : Payout; Err : text };
 type Result_3 = variant { Ok : nat; Err : text };
-type Result_4 = variant { Ok : text; Err : text };
 type Split = record {
   account_canister_id : nat64;
   index_block : opt nat64;
@@ -119,6 +134,7 @@ type Transaction = record {
   memo : opt blob;
   timestamp_to_account : opt nat64;
   notify_processing : bool;
+  source_type : nat8;
   timestamp : nat64;
   index_received : opt nat64;
   sender_principal_id : text;
@@ -127,6 +143,11 @@ type Transaction = record {
   splits : vec Split;
   timestamp_received : opt nat64;
   amount : nat;
+  // New V2 fields
+  external_cost_amount : opt nat;
+  recipient_principal_id : opt text;
+  relay_fee_amount : opt nat;
+  kind : opt nat8;
 };
 type TransactionFilter = record {
   from_timestamp : opt nat64;
@@ -150,25 +171,18 @@ type TransactionStatus = variant {
   Completed;
   Pending;
 };
-type WithdrawRequest = record {
-  recipient : text;
-  ledger_canister_id : text;
-  amount : nat;
-};
 service : () -> {
   add_account : (nat64, Account) -> (Result);
+  add_allowed_ledger : (text, LedgerStandard) -> (Result);
+  add_allowed_ledger_v2 : (text, LedgerStandard, bool, nat64, nat64) -> (Result);
+  set_allowed_ledger_config : (text, LedgerStandard, bool, nat64, nat64) -> (Result);
   get_account : (nat64) -> (opt Account) query;
   get_account_transactions : (nat64, opt nat32, opt nat32) -> (
       TransactionResult,
     ) query;
-  get_canister_info : () -> (CanisterMetrics);
-  get_controller : () -> (principal) query;
+  get_canister_info : () -> (CanisterMetrics) query;
   get_controllers : () -> (vec principal) query;
-  get_ledger_transactions : (text, opt nat32, opt nat32) -> (
-      TransactionResult,
-    ) query;
   get_payout : (nat) -> (opt Payout) query;
-  get_platform_wallet : () -> (text) query;
   get_refund_by_original_tx_id : (nat) -> (opt Refund) query;
   get_transaction : (nat) -> (opt Transaction) query;
   get_transaction_status_public : (nat64, nat, opt nat64) -> (
@@ -177,17 +191,18 @@ service : () -> {
   get_transactions : (TransactionFilter) -> (TransactionResult) query;
   icrc21_canister_call_consent_message : (Icrc21ConsentMessageRequest) -> (
       Icrc21ConsentMessageResponse,
-    );
+    ) query;
   initialize_controllers : () -> (Result);
   list_accounts : () -> (vec AccountRecord) query;
+  list_allowed_ledgers : () -> (vec AllowedLedgerInfo) query;
   notify_ledger_transaction : (LedgerTransactionNotification) -> (Result_1);
+  notify_ledger_transaction_v2 : (LedgerTransactionNotification, nat64, opt nat, opt text) -> (Result_1);
+  notify_onramp_icp : (blob, blob) -> (Result_1);
   remove_account : (nat64) -> (Result);
-  request_payout : (nat64, text, nat) -> (Result_2);
+  remove_allowed_ledger : (text) -> (Result);
+  request_payout : (nat, nat64, text, nat) -> (Result_2);
   request_refund : (nat) -> (Result_3);
-  retry_payout : (nat) -> (Result_2);
-  set_controller : (principal) -> (Result);
   set_platform_wallet : (text) -> (Result);
   update_account : (nat64, Account) -> (Result);
   update_controllers : () -> (Result);
-  withdraw_funds : (WithdrawRequest) -> (Result_4);
 }

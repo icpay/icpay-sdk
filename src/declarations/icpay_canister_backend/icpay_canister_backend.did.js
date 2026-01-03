@@ -5,9 +5,14 @@ export const idlFactory = ({ IDL }) => {
   });
   const Account = IDL.Record({
     'account_canister_id' : IDL.Nat64,
+    'relay_fee_percentage' : IDL.Opt(IDL.Nat16),
+    'payout_count' : IDL.Opt(IDL.Nat32),
+    'refund_count' : IDL.Opt(IDL.Nat32),
     'platform_fee_percentage' : IDL.Nat16,
     'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'wallet_address' : IDL.Text,
+    'payout_limit' : IDL.Opt(IDL.Nat32),
+    'refund_limit' : IDL.Opt(IDL.Nat32),
     'icp_account_identifier' : IDL.Opt(IDL.Text),
     'platform_fee_fixed' : IDL.Opt(IDL.Nat),
     'is_active' : IDL.Bool,
@@ -39,9 +44,12 @@ export const idlFactory = ({ IDL }) => {
     'account_canister_id' : IDL.Nat64,
     'platform_fee_amount' : IDL.Nat,
     'transfer_fee' : IDL.Nat,
+    'external_cost_amount' : IDL.Opt(IDL.Nat),
+    'kind' : IDL.Opt(IDL.Nat8),
     'memo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'timestamp_to_account' : IDL.Opt(IDL.Nat64),
     'notify_processing' : IDL.Bool,
+    'relay_fee_amount' : IDL.Opt(IDL.Nat),
     'source_type' : IDL.Nat8,
     'timestamp' : IDL.Nat64,
     'index_received' : IDL.Opt(IDL.Nat64),
@@ -51,6 +59,7 @@ export const idlFactory = ({ IDL }) => {
     'splits' : IDL.Vec(Split),
     'timestamp_received' : IDL.Opt(IDL.Nat64),
     'amount' : IDL.Nat,
+    'recipient_principal_id' : IDL.Opt(IDL.Text),
   });
   const TransactionResult = IDL.Record({
     'transactions' : IDL.Vec(Transaction),
@@ -162,6 +171,9 @@ export const idlFactory = ({ IDL }) => {
   });
   const AllowedLedgerInfo = IDL.Record({
     'canister_id' : IDL.Text,
+    'allowed' : IDL.Bool,
+    'minimum_amount' : IDL.Nat64,
+    'minimal_platform_fee' : IDL.Nat64,
     'standard' : LedgerStandard,
   });
   const LedgerTransactionNotification = IDL.Record({
@@ -179,6 +191,11 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     'add_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'add_allowed_ledger' : IDL.Func([IDL.Text, LedgerStandard], [Result], []),
+    'add_allowed_ledger_v2' : IDL.Func(
+        [IDL.Text, LedgerStandard, IDL.Bool, IDL.Nat64, IDL.Nat64],
+        [Result],
+        [],
+      ),
     'get_account' : IDL.Func([IDL.Nat64], [IDL.Opt(Account)], ['query']),
     'get_account_transactions' : IDL.Func(
         [IDL.Nat64, IDL.Opt(IDL.Nat32), IDL.Opt(IDL.Nat32)],
@@ -221,6 +238,16 @@ export const idlFactory = ({ IDL }) => {
         [Result_1],
         [],
       ),
+    'notify_ledger_transaction_v2' : IDL.Func(
+        [
+          LedgerTransactionNotification,
+          IDL.Nat64,
+          IDL.Opt(IDL.Nat),
+          IDL.Opt(IDL.Text),
+        ],
+        [Result_1],
+        [],
+      ),
     'notify_onramp_icp' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Vec(IDL.Nat8)],
         [Result_1],
@@ -234,6 +261,11 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'request_refund' : IDL.Func([IDL.Nat], [Result_3], []),
+    'set_allowed_ledger_config' : IDL.Func(
+        [IDL.Text, LedgerStandard, IDL.Bool, IDL.Nat64, IDL.Nat64],
+        [Result],
+        [],
+      ),
     'set_platform_wallet' : IDL.Func([IDL.Text], [Result], []),
     'update_account' : IDL.Func([IDL.Nat64, Account], [Result], []),
     'update_controllers' : IDL.Func([], [Result], []),

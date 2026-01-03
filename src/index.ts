@@ -736,10 +736,36 @@ export class Icpay {
     let canisterTransactionId: number | undefined;
     try {
       debugLog(this.config.debug || false, 'notifying canister about ledger tx', { icpayCanisterId: this.icpayCanisterId, ledgerCanisterId, blockIndex });
+      // Attempt to decode accountCanisterId from packed memo (high 32 bits)
+      let acctFromMemo: number | undefined = undefined;
+      try {
+        if (memo && memo.length > 0) {
+          let big = 0n;
+          for (let i = 0; i < memo.length; i++) {
+            big |= BigInt(memo[i] & 0xff) << BigInt(8 * i);
+          }
+          const acct = Number(big >> 32n);
+          if (Number.isFinite(acct) && acct > 0) acctFromMemo = acct;
+        }
+      } catch {}
+      // Derive recipient principal for relay from request payload (IC address)
+      const recipientPrincipal = (() => {
+        const addrAny: any = (request as any);
+        const icAddr = (addrAny?.recipientAddresses?.ic || addrAny?.recipientAddress || '').toString().trim();
+        // Heuristic: treat non-hex, non-empty as IC principal candidate
+        if (icAddr && !/^0x[a-fA-F0-9]{40}$/.test(icAddr)) return icAddr;
+        return undefined;
+      })();
+      const externalCostAmount = (request as any).__externalCostAmount ?? (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount;
       const notifyRes: any = await this.notifyLedgerTransaction(
         this.icpayCanisterId!,
         ledgerCanisterId!,
-        BigInt(blockIndex)
+        BigInt(blockIndex),
+        {
+          accountCanisterId: acctFromMemo,
+          externalCostAmount,
+          recipientPrincipal
+        }
       );
       if (typeof notifyRes === 'string') {
         const parsed = parseInt(notifyRes, 10);
@@ -1558,6 +1584,7 @@ export class Icpay {
         const maybeV2 = (actor as any)?.notify_ledger_transaction_v2;
         const haveAcct = typeof opts?.accountCanisterId === 'number' && Number.isFinite(opts.accountCanisterId);
         if (maybeV2 && haveAcct) {
+          try { debugLog(this.config.debug || false, 'notify using v2', { ledgerCanisterId, blockIndex: blockIndex.toString(), accountCanisterId: opts?.accountCanisterId, hasExternalCost: opts?.externalCostAmount != null, hasRecipient: Boolean((opts?.recipientPrincipal || '').trim()) }); } catch {}
           const externalCost = (() => {
             if (opts?.externalCostAmount == null) return [];
             try {
@@ -1577,6 +1604,7 @@ export class Icpay {
             recipient
           );
         } else {
+          try { debugLog(this.config.debug || false, 'notify using v1 (fallback)', { ledgerCanisterId, blockIndex: blockIndex.toString(), haveAcct }); } catch {}
           // Fallback to legacy notify
           result = await (actor as any).notify_ledger_transaction({
             // Canister expects text for ledger_canister_id
