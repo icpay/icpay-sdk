@@ -2147,57 +2147,41 @@ export class Icpay {
                     try { const con = await sol.connect(); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
                   }
                   if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
-                  // Decode message and sign
-                  const msgBytes = ((): Uint8Array => {
-                    try { return new Uint8Array(Buffer.from(String(signable.messageBase64), 'base64')); } catch { return new Uint8Array([]); }
-                  })();
-                  if (!msgBytes || msgBytes.length === 0) {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Invalid signable message' });
-                  }
-                  let sigResp: any = null;
-                  if (typeof sol.signMessage === 'function') {
-                    sigResp = await sol.signMessage(msgBytes);
-                  } else if (sol?.signer && typeof sol.signer.signMessage === 'function') {
-                    sigResp = await sol.signer.signMessage(msgBytes);
-                  } else {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signMessage' });
-                  }
-                  const signatureBytes: Uint8Array =
-                    (sigResp?.signature && (sigResp.signature as Uint8Array)) ||
-                    (sigResp instanceof Uint8Array ? sigResp : (Array.isArray(sigResp) ? new Uint8Array(sigResp) : null));
-                  if (!signatureBytes || signatureBytes.length === 0) {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Failed to sign message' });
-                  }
-                  const signatureB64 = (() => {
-                    try { return btoa(String.fromCharCode(...Array.from(signatureBytes))); } catch { return Buffer.from(signatureBytes).toString('base64'); }
-                  })();
-                  // Build x402 header directly from server-provided fields + signature
-                  const headerObj = {
-                    x402Version: Number(data?.x402Version || 2),
-                    scheme: String(requirement?.scheme || 'exact'),
-                    network: String(requirement?.network || ''),
-                    payload: {
-                      authorization: {
-                        from: fromBase58,
-                        id: String(signable?.fields?.idHex || ''),
-                        accountId: String(signable?.fields?.accountId || ''),
-                        value: String(signable?.fields?.amount || ''),
-                        externalCost: String(signable?.fields?.externalCost || '0'),
-                        validAfter: String(signable?.fields?.validAfter || '0'),
-                        validBefore: String(signable?.fields?.validBefore || '0'),
-                        nonce: String(signable?.fields?.nonceHex || ''),
-                      },
-                      signature: signatureB64,
-                    },
-                  };
-                  paymentHeader = ((): string => {
-                    const json = JSON.stringify(headerObj);
-                    try { return btoa(json); } catch { return Buffer.from(json, 'utf8').toString('base64'); }
-                  })();
-                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
+                  // Build signer-based transaction, user signs it, and server relays
+                  const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
                     paymentIntentId,
-                    paymentHeader,
+                    paymentHeader: 'e30=', // unused for signer path; keep param for shape
                     paymentRequirements: requirement,
+                  });
+                  if (!prep?.ok || !prep?.transactionBase64) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signer prepare failed', details: prep });
+                  }
+                  let signedTxB64: string | null = null;
+                  if ((sol as any)?.request) {
+                    try {
+                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: String(prep.transactionBase64) } });
+                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
+                    } catch (e) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
+                    }
+                  } else if (typeof (sol as any)?.signTransaction === 'function') {
+                    // Some wallets expose direct signTransaction expecting a deserialized tx; best-effort: pass base64 if supported
+                    try {
+                      const r = await (sol as any).signTransaction({ transaction: String(prep.transactionBase64) });
+                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
+                    } catch (e) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
+                    }
+                  } else {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signTransaction' });
+                  }
+                  if (!signedTxB64 || typeof signedTxB64 !== 'string') {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Missing signed transaction' });
+                  }
+                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                    paymentIntentId,
+                    signedTransactionBase64: signedTxB64,
+                    rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
                   });
                   try {
                     debugLog(this.config?.debug || false, 'x402 (sol) settle response (relay via services)', {
