@@ -120,7 +120,8 @@ export async function buildAndSignX402PaymentHeader(
     const netStr = typeof netStrRaw === 'string' ? netStrRaw : String(netStrRaw || '');
     const isSol = /^solana:/i.test(netStr);
     if (isSol) {
-      // Solana x402 v2: sign an ed25519 message with the user's wallet
+      // Solana x402 v2: wallet-standard path (signTransaction). We keep builder utilities here,
+      // but SDK uses an unsigned transaction provided by the API (no signMessage).
       // Prefer a real Solana provider; avoid EVM providers accidentally injected
       // Prefer Phantom, then common Solana providers
       const solCandidates: any[] = [

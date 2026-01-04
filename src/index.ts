@@ -2148,15 +2148,11 @@ export class Icpay {
                   if (inlineTx) {
                     txBase64 = String(inlineTx);
                   } else {
-                    const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
-                      paymentIntentId,
-                      paymentHeader: 'e30=', // unused for signer path; keep param for shape
-                      paymentRequirements: requirement,
+                    throw new IcpayError({
+                      code: ICPAY_ERROR_CODES.API_ERROR,
+                      message: 'X402 missing transactionBase64 in 402 response for Solana',
+                      details: { note: 'API must include extra.transactionBase64 to avoid prepare' }
                     });
-                    if (!prep?.ok || !prep?.transactionBase64) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signer prepare failed', details: prep });
-                    }
-                    txBase64 = String(prep.transactionBase64);
                   }
                   let signedTxB64: string | null = null;
                   if ((sol as any)?.request) {
