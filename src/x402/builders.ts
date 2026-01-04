@@ -114,6 +114,124 @@ export async function buildAndSignX402PaymentHeader(
   context?: { x402Version?: number; debug?: boolean; provider?: any }
 ): Promise<string> {
   const w: any = (globalThis as any)?.window || (globalThis as any);
+  // Branch by network namespace: EVM (eip155) vs Solana (solana)
+  try {
+    const netStrRaw = (requirement?.network as any) || '';
+    const netStr = typeof netStrRaw === 'string' ? netStrRaw : String(netStrRaw || '');
+    const isSol = /^solana:/i.test(netStr);
+    if (isSol) {
+      // Solana x402 v2: sign an ed25519 message with the user's wallet
+      const sol: any = (context as any)?.provider || (w as any)?.solana || (w as any)?.phantom?.solana;
+      if (!sol) throw new Error('No Solana wallet available for X402');
+      // Require signMessage support
+      const canSignMessage = typeof sol.signMessage === 'function' || (sol.signer && typeof sol.signer.signMessage === 'function');
+      if (!canSignMessage) throw new Error('Solana wallet does not support signMessage');
+      // Discover from (base58)
+      let fromBase58: string | null = null;
+      try {
+        if (typeof sol.connect === 'function') {
+          const con = await sol.connect();
+          fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null;
+        }
+      } catch {}
+      if (!fromBase58) {
+        try {
+          fromBase58 = sol?.publicKey?.toBase58?.() || sol?.publicKey || null;
+        } catch {}
+      }
+      if (!fromBase58 || typeof fromBase58 !== 'string') {
+        throw new Error('No Solana wallet account available for X402');
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const validAfter = (nowSec - 86400).toString();
+      const validBefore = (nowSec + Number(requirement?.maxTimeoutSeconds || 300)).toString();
+      // 32-byte random nonce hex
+      let nonceBytes = new Uint8Array(32);
+      try {
+        if (w?.crypto?.getRandomValues) w.crypto.getRandomValues(nonceBytes);
+        else {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const nodeCrypto = typeof require === 'function' ? require('crypto') : null;
+          nonceBytes = nodeCrypto?.randomBytes ? nodeCrypto.randomBytes(32) : nonceBytes;
+          if (!nodeCrypto?.randomBytes) {
+            for (let i = 0; i < nonceBytes.length; i++) nonceBytes[i] = Math.floor(Math.random() * 256);
+          }
+        }
+      } catch {
+        for (let i = 0; i < nonceBytes.length; i++) nonceBytes[i] = Math.floor(Math.random() * 256);
+      }
+      const nonceHex = '0x' + Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      // Build id = pack(accountId (u64, big-endian) into high 8 bytes, intentCode (u32 big-endian) into low 4 bytes)
+      const accountIdStr = String((requirement?.extra as any)?.accountCanisterId || '');
+      const intentCodeStr = String((requirement?.extra as any)?.intentCode || '0');
+      const accountId = BigInt(accountIdStr || '0');
+      const intentCode = BigInt(intentCodeStr || '0');
+      const idBytes = (() => {
+        const out = new Uint8Array(32);
+        for (let i = 0; i < 8; i++) {
+          out[i] = Number((accountId >> BigInt(8 * (7 - i))) & 0xffn);
+        }
+        out[28] = Number((intentCode >> 24n) & 0xffn);
+        out[29] = Number((intentCode >> 16n) & 0xffn);
+        out[30] = Number((intentCode >> 8n) & 0xffn);
+        out[31] = Number(intentCode & 0xffn);
+        return out;
+      })();
+      const amountStr = String(requirement?.maxAmountRequired || '0');
+      // Build message: id(32) + account_id(u64 LE) + amount(u64 LE) + external_cost(u64 LE) + valid_after(i64 LE) + valid_before(i64 LE) + nonce(32)
+      const toLeU64 = (numStr: string) => {
+        const n = BigInt(numStr || '0');
+        const b = new Uint8Array(8);
+        let v = n;
+        for (let i = 0; i < 8; i++) { b[i] = Number(v & 0xffn); v >>= 8n; }
+        return b;
+      };
+      const toLeI64 = (numStr: string) => {
+        // treat as signed in little-endian two's complement if needed (validAfter/validBefore are positive)
+        return toLeU64(numStr);
+      };
+      const externalCostStr = String(((requirement?.extra as any)?.externalCostAmount) || '0');
+      const msgParts: Uint8Array[] = [
+        idBytes,
+        toLeU64(accountIdStr || '0'),
+        toLeU64(amountStr),
+        toLeU64(externalCostStr),
+        toLeI64(validAfter),
+        toLeI64(validBefore),
+        new Uint8Array(nonceBytes),
+      ];
+      const message = new Uint8Array(msgParts.reduce((s, p) => s + p.length, 0));
+      { let o = 0; for (const p of msgParts) { message.set(p, o); o += p.length; } }
+      // Sign message
+      const sigResp = typeof sol.signMessage === 'function'
+        ? await sol.signMessage(message, 'utf8')
+        : await sol.signer.signMessage(message, 'utf8');
+      const signatureBytes: Uint8Array = (sigResp?.signature && (sigResp.signature as Uint8Array)) || (Array.isArray(sigResp) ? new Uint8Array(sigResp) : (sigResp as Uint8Array));
+      const signatureB64 = (() => {
+        try { return btoa(String.fromCharCode(...Array.from(signatureBytes))); } catch { return Buffer.from(signatureBytes).toString('base64'); }
+      })();
+      const idHex = '0x' + Array.from(idBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const headerObj = {
+        x402Version: Number(context?.x402Version || 2),
+        scheme: String(requirement?.scheme || 'exact'),
+        network: String(requirement?.network || ''),
+        payload: {
+          authorization: {
+            from: fromBase58,
+            id: idHex,
+            accountId: accountIdStr,
+            value: amountStr,
+            externalCost: externalCostStr,
+            validAfter,
+            validBefore,
+            nonce: nonceHex,
+          },
+          signature: signatureB64,
+        },
+      };
+      return encodeX402Header(headerObj as any);
+    }
+  } catch {}
   const eth = (context as any)?.provider || w?.ethereum;
   if (!eth || !eth.request) {
     throw new Error('No EVM wallet available for X402');
@@ -121,7 +239,9 @@ export async function buildAndSignX402PaymentHeader(
   // Ensure wallet is on the intended chain for reliable eth_call (token name) and consistent UX
   try {
     const netStr = (requirement?.network as any) || '';
-    const chainIdDec = typeof netStr === 'string' ? parseInt(netStr, 10) : Number(netStr || 0);
+    // Support CAIP-2 (e.g., "eip155:8453") and plain decimal strings
+    const caipMatch = typeof netStr === 'string' ? netStr.match(/^eip155:(\d+)$/i) : null;
+    const chainIdDec = caipMatch ? parseInt(caipMatch[1], 10) : (typeof netStr === 'string' ? parseInt(netStr, 10) : Number(netStr || 0));
     if (Number.isFinite(chainIdDec) && chainIdDec > 0) {
       const hex = '0x' + chainIdDec.toString(16);
       try {
@@ -170,10 +290,16 @@ export async function buildAndSignX402PaymentHeader(
 
   const extra = (requirement?.extra || {}) as any;
   const primaryType = String(extra?.primaryType || 'TransferWithAuthorization');
+  // Resolve chainId from CAIP-2 if provided, else numeric string
+  const caipMatchForDomain = typeof (requirement?.network as any) === 'string' ? String(requirement?.network).match(/^eip155:(\d+)$/i) : null;
+  const resolvedChainId = caipMatchForDomain
+    ? parseInt(caipMatchForDomain[1], 10)
+    : (typeof (requirement?.network as any) === 'string' ? parseInt(String(requirement?.network), 10) : Number((requirement?.network as any) || 0)) || undefined;
   const domain = makeEip712Domain({
     name: String(extra?.name || 'Token'),
-    version: String(extra?.eip3009Version || '1'),
-    chainId: Number((requirement?.network as any) || 0) || undefined,
+    // Default to '2' to align with common USDC EIP-3009 v2; can be overridden by requirement.extra
+    version: String(extra?.eip3009Version || '2'),
+    chainId: typeof resolvedChainId === 'number' && Number.isFinite(resolvedChainId) && resolvedChainId > 0 ? resolvedChainId : undefined,
     verifyingContract: String(requirement?.asset || requirement?.payTo || ''),
   });
 
