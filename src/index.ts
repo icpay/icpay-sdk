@@ -2108,10 +2108,14 @@ export class Icpay {
 
             if (requirement) {
               try {
+                const isSol = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('solana:');
+                const providerForHeader = isSol
+                  ? ((this.config as any)?.solanaProvider || (globalThis as any)?.solana || (globalThis as any)?.phantom?.solana)
+                  : ((this.config as any)?.evmProvider || (globalThis as any)?.ethereum);
                 const paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
-                  x402Version: Number(data?.x402Version || 1),
+                  x402Version: Number(data?.x402Version || 2),
                   debug: this.config?.debug || false,
-                  provider: (this.config as any)?.evmProvider || (typeof (globalThis as any)?.ethereum !== 'undefined' ? (globalThis as any).ethereum : undefined),
+                  provider: providerForHeader,
                 });
                 // Start verification stage while we wait for settlement to process
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
