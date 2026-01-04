@@ -2060,6 +2060,15 @@ export class Icpay {
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
       };
+      // Include Solana payerPublicKey if available so server can build unsigned tx inline for Solana x402
+      try {
+        const w: any = (globalThis as any)?.window || (globalThis as any);
+        const sol = (this.config as any)?.solanaProvider || w?.solana || w?.phantom?.solana;
+        const pk = sol?.publicKey?.toBase58?.() || sol?.publicKey || null;
+        if (pk && typeof pk === 'string') {
+          (body as any).payerPublicKey = pk;
+        }
+      } catch {}
 
       try {
         const resp: any = await this.publicApiClient.post('/sdk/public/payments/intents/x402', body);
@@ -2122,21 +2131,8 @@ export class Icpay {
                   });
                 }
                 if (isSol) {
-                  // Solana x402: prefer inline signable payload from 402 response; fallback to signable endpoint
-                  let signable: any = null;
-                  const inlineMsg = (requirement as any)?.extra?.signableMessageBase64;
-                  const inlineFields = (requirement as any)?.extra?.signableFields;
-                  if (inlineMsg) {
-                    signable = { ok: true, messageBase64: inlineMsg, fields: inlineFields || {} };
-                  } else {
-                    signable = await this.publicApiClient.post('/sdk/public/payments/x402/signable', {
-                      paymentIntentId,
-                      paymentRequirements: requirement,
-                    });
-                    if (!signable?.ok || !signable?.messageBase64) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signable payload not available', details: signable });
-                    }
-                  }
+                  // Solana x402: prefer inline unsigned transaction from 402 response; otherwise prepare
+                  const inlineTx: string | undefined = (requirement as any)?.extra?.transactionBase64;
                   const w: any = (globalThis as any)?.window || (globalThis as any);
                   const sol = providerForHeader;
                   if (!sol) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana provider not available (window.solana)' });
@@ -2148,18 +2144,24 @@ export class Icpay {
                   }
                   if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
                   // Build signer-based transaction, user signs it, and server relays
-                  const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
-                    paymentIntentId,
-                    paymentHeader: 'e30=', // unused for signer path; keep param for shape
-                    paymentRequirements: requirement,
-                  });
-                  if (!prep?.ok || !prep?.transactionBase64) {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signer prepare failed', details: prep });
+                  let txBase64: string;
+                  if (inlineTx) {
+                    txBase64 = String(inlineTx);
+                  } else {
+                    const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
+                      paymentIntentId,
+                      paymentHeader: 'e30=', // unused for signer path; keep param for shape
+                      paymentRequirements: requirement,
+                    });
+                    if (!prep?.ok || !prep?.transactionBase64) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signer prepare failed', details: prep });
+                    }
+                    txBase64 = String(prep.transactionBase64);
                   }
                   let signedTxB64: string | null = null;
                   if ((sol as any)?.request) {
                     try {
-                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: String(prep.transactionBase64) } });
+                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } });
                       signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
@@ -2167,7 +2169,7 @@ export class Icpay {
                   } else if (typeof (sol as any)?.signTransaction === 'function') {
                     // Some wallets expose direct signTransaction expecting a deserialized tx; best-effort: pass base64 if supported
                     try {
-                      const r = await (sol as any).signTransaction({ transaction: String(prep.transactionBase64) });
+                      const r = await (sol as any).signTransaction({ transaction: txBase64 });
                       signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
