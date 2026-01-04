@@ -2107,44 +2107,150 @@ export class Icpay {
             let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
 
             if (requirement) {
+              // Determine network once for error handling policy
+              const isSol = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('solana:');
               try {
-                const isSol = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('solana:');
                 const providerForHeader = isSol
                   ? ((this.config as any)?.solanaProvider || (globalThis as any)?.solana || (globalThis as any)?.phantom?.solana)
                   : ((this.config as any)?.evmProvider || (globalThis as any)?.ethereum);
-                const paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
-                  x402Version: Number(data?.x402Version || 2),
-                  debug: this.config?.debug || false,
-                  provider: providerForHeader,
-                });
-                // For Solana x402, use prepare -> wallet.signAndSendTransaction flow
+                let paymentHeader: string | null = null;
+                if (!isSol) {
+                  paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
+                    x402Version: Number(data?.x402Version || 2),
+                    debug: this.config?.debug || false,
+                    provider: providerForHeader,
+                  });
+                }
                 if (isSol) {
-                  const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
+                  // Solana x402: prefer inline signable payload from 402 response; fallback to signable endpoint
+                  let signable: any = null;
+                  const inlineMsg = (requirement as any)?.extra?.signableMessageBase64;
+                  const inlineFields = (requirement as any)?.extra?.signableFields;
+                  if (inlineMsg) {
+                    signable = { ok: true, messageBase64: inlineMsg, fields: inlineFields || {} };
+                  } else {
+                    signable = await this.publicApiClient.post('/sdk/public/payments/x402/signable', {
+                      paymentIntentId,
+                      paymentRequirements: requirement,
+                    });
+                    if (!signable?.ok || !signable?.messageBase64) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'X402 signable payload not available', details: signable });
+                    }
+                  }
+                  const w: any = (globalThis as any)?.window || (globalThis as any);
+                  const sol = providerForHeader;
+                  if (!sol) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana provider not available (window.solana)' });
+                  // Get public key (already connected from widget)
+                  let fromBase58: string | null = null;
+                  try { fromBase58 = sol?.publicKey?.toBase58?.() || sol?.publicKey || null; } catch {}
+                  if (!fromBase58 && typeof sol.connect === 'function') {
+                    try { const con = await sol.connect(); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
+                  }
+                  if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
+                  // Decode message and sign
+                  const msgBytes = ((): Uint8Array => {
+                    try { return new Uint8Array(Buffer.from(String(signable.messageBase64), 'base64')); } catch { return new Uint8Array([]); }
+                  })();
+                  if (!msgBytes || msgBytes.length === 0) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Invalid signable message' });
+                  }
+                  let sigResp: any = null;
+                  if (typeof sol.signMessage === 'function') {
+                    sigResp = await sol.signMessage(msgBytes);
+                  } else if (sol?.signer && typeof sol.signer.signMessage === 'function') {
+                    sigResp = await sol.signer.signMessage(msgBytes);
+                  } else {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signMessage' });
+                  }
+                  const signatureBytes: Uint8Array =
+                    (sigResp?.signature && (sigResp.signature as Uint8Array)) ||
+                    (sigResp instanceof Uint8Array ? sigResp : (Array.isArray(sigResp) ? new Uint8Array(sigResp) : null));
+                  if (!signatureBytes || signatureBytes.length === 0) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Failed to sign message' });
+                  }
+                  const signatureB64 = (() => {
+                    try { return btoa(String.fromCharCode(...Array.from(signatureBytes))); } catch { return Buffer.from(signatureBytes).toString('base64'); }
+                  })();
+                  // Build x402 header directly from server-provided fields + signature
+                  const headerObj = {
+                    x402Version: Number(data?.x402Version || 2),
+                    scheme: String(requirement?.scheme || 'exact'),
+                    network: String(requirement?.network || ''),
+                    payload: {
+                      authorization: {
+                        from: fromBase58,
+                        id: String(signable?.fields?.idHex || ''),
+                        accountId: String(signable?.fields?.accountId || ''),
+                        value: String(signable?.fields?.amount || ''),
+                        externalCost: String(signable?.fields?.externalCost || '0'),
+                        validAfter: String(signable?.fields?.validAfter || '0'),
+                        validBefore: String(signable?.fields?.validBefore || '0'),
+                        nonce: String(signable?.fields?.nonceHex || ''),
+                      },
+                      signature: signatureB64,
+                    },
+                  };
+                  paymentHeader = ((): string => {
+                    const json = JSON.stringify(headerObj);
+                    try { return btoa(json); } catch { return Buffer.from(json, 'utf8').toString('base64'); }
+                  })();
+                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                     paymentIntentId,
                     paymentHeader,
                     paymentRequirements: requirement,
                   });
-                  if (prep?.ok && prep?.transactionBase64) {
-                    const amountUnits = BigInt(String(requirement?.maxAmountRequired || '0'));
-                    const result = await this.processSolanaPayment({
-                      contractAddress: String(requirement?.payTo || ''),
-                      ledgerCanisterId: String(requirement?.asset || ''),
-                      amount: amountUnits,
-                      memo: undefined,
-                      paymentIntentId,
-                      request: { ...(request as any), __transactionBase64: String(prep.transactionBase64) },
-                      metadata: { ...(request.metadata || {}), icpay_x402: true },
-                      rpcUrlPublic: String((requirement as any)?.extra?.rpcUrlPublic || prep?.rpcUrl || ''),
-                      chainName: 'solana',
-                      accountCanisterId: String((requirement as any)?.extra?.accountCanisterId || ''),
-                      rpcChainId: (requirement as any)?.extra?.rpcChainId || null,
-                      paymentIntentCode: (requirement as any)?.extra?.intentCode || null,
+                  try {
+                    debugLog(this.config?.debug || false, 'x402 (sol) settle response (relay via services)', {
+                      ok: (settleResp as any)?.ok,
+                      status: (settleResp as any)?.status,
+                      paymentIntentId: (settleResp as any)?.paymentIntent?.id,
+                      paymentId: (settleResp as any)?.payment?.id,
+                      rawKeys: Object.keys(settleResp || {}),
                     });
-                    this.emitMethodSuccess('createPaymentX402Usd', result);
-                    return result;
+                  } catch {}
+                  // Move to "Payment confirmation" stage (after relayer submission)
+                  try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                  const statusSol = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
+                  const amountSol =
+                    (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
+                    (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+                  const outSol = {
+                    transactionId: Number(settleResp?.canisterTxId || 0),
+                    status: statusSol === 'succeeded' ? 'completed' : statusSol,
+                    amount: amountSol,
+                    recipientCanister: ledgerCanisterId,
+                    timestamp: new Date(),
+                    metadata: { ...(request.metadata || {}), icpay_x402: true },
+                    payment: settleResp || null,
+                  } as any;
+                  // Do not fallback to normal flow for Solana x402; surface failure
+                  const isTerminalSol = (() => {
+                    const s = String(outSol.status || '').toLowerCase();
+                    return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
+                  })();
+                  if (isTerminalSol) {
+                    if (outSol.status === 'completed') {
+                      this.emit('icpay-sdk-transaction-completed', outSol);
+                    } else if (outSol.status === 'failed') {
+                      this.emit('icpay-sdk-transaction-failed', outSol);
+                    } else {
+                      this.emit('icpay-sdk-transaction-updated', outSol);
+                    }
+                    this.emitMethodSuccess('createPaymentX402Usd', outSol);
+                    return outSol;
                   }
+                  // Non-terminal: wait until terminal via notify loop
+                  try { this.emit('icpay-sdk-transaction-updated', outSol); } catch {}
+                  const waitedSol = await this.awaitIntentTerminal({
+                    paymentIntentId,
+                    ledgerCanisterId: ledgerCanisterId,
+                    amount: amountSol,
+                    metadata: { ...(request.metadata || {}), icpay_x402: true },
+                  });
+                  this.emitMethodSuccess('createPaymentX402Usd', waitedSol);
+                  return waitedSol;
                 }
-                // Start verification stage while we wait for settlement to process (EVM or fallback)
+                // EVM: server-side settlement
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
                 const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                   paymentIntentId,
@@ -2180,7 +2286,6 @@ export class Icpay {
                 const failMsg = (settleResp as any)?.message || (settleResp as any)?.error || '';
                 if (out.status === 'failed' && (failMsg === 'x402_minimal_platform_fee_not_met' || failMsg === 'x402_minimum_amount_not_met')) {
                   try { this.emit('icpay-sdk-transaction-failed', { ...out, reason: failMsg }); } catch {}
-                  // Initiate regular flow (non-x402) with the same request
                   const fallback = await this.createPaymentUsd(request);
                   this.emitMethodSuccess('createPaymentX402Usd', fallback);
                   return fallback;
@@ -2210,8 +2315,12 @@ export class Icpay {
                 });
                 this.emitMethodSuccess('createPaymentX402Usd', waited);
                 return waited;
-              } catch {
-                // Fall through to notify-based wait if settle endpoint not available
+              } catch (err) {
+                // For Solana x402, do not silently fall back; surface the error so user can retry/sign
+                if (isSol) {
+                  throw (err instanceof IcpayError) ? err : new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'X402 Solana flow failed before signing', details: err });
+                }
+                // Non-Solana: fall through to notify-based wait if settle endpoint not available
               }
             }
             // Fallback: wait until terminal via notify loop
