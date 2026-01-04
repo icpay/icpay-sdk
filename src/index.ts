@@ -2117,7 +2117,34 @@ export class Icpay {
                   debug: this.config?.debug || false,
                   provider: providerForHeader,
                 });
-                // Start verification stage while we wait for settlement to process
+                // For Solana x402, use prepare -> wallet.signAndSendTransaction flow
+                if (isSol) {
+                  const prep: any = await this.publicApiClient.post('/sdk/public/payments/x402/prepare', {
+                    paymentIntentId,
+                    paymentHeader,
+                    paymentRequirements: requirement,
+                  });
+                  if (prep?.ok && prep?.transactionBase64) {
+                    const amountUnits = BigInt(String(requirement?.maxAmountRequired || '0'));
+                    const result = await this.processSolanaPayment({
+                      contractAddress: String(requirement?.payTo || ''),
+                      ledgerCanisterId: String(requirement?.asset || ''),
+                      amount: amountUnits,
+                      memo: undefined,
+                      paymentIntentId,
+                      request: { ...(request as any), __transactionBase64: String(prep.transactionBase64) },
+                      metadata: { ...(request.metadata || {}), icpay_x402: true },
+                      rpcUrlPublic: String((requirement as any)?.extra?.rpcUrlPublic || prep?.rpcUrl || ''),
+                      chainName: 'solana',
+                      accountCanisterId: String((requirement as any)?.extra?.accountCanisterId || ''),
+                      rpcChainId: (requirement as any)?.extra?.rpcChainId || null,
+                      paymentIntentCode: (requirement as any)?.extra?.intentCode || null,
+                    });
+                    this.emitMethodSuccess('createPaymentX402Usd', result);
+                    return result;
+                  }
+                }
+                // Start verification stage while we wait for settlement to process (EVM or fallback)
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
                 const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                   paymentIntentId,
