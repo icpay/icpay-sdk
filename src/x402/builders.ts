@@ -121,22 +121,37 @@ export async function buildAndSignX402PaymentHeader(
     const isSol = /^solana:/i.test(netStr);
     if (isSol) {
       // Solana x402 v2: sign an ed25519 message with the user's wallet
-      const sol: any = (context as any)?.provider || (w as any)?.solana || (w as any)?.phantom?.solana;
+      // Prefer a real Solana provider; avoid EVM providers accidentally injected
+      // Prefer Phantom, then common Solana providers
+      const solCandidates: any[] = [
+        (w as any)?.phantom?.solana,
+        (w as any)?.solana,
+        (context as any)?.provider,
+      ].filter(Boolean);
+      const sol: any =
+        solCandidates.find((p) => !!(p?.isPhantom === true)) ||
+        solCandidates.find((p) => !!(p?.isBackpack || p?.isSolflare)) ||
+        solCandidates.find((p) => !!(p?.signMessage || p?.signer?.signMessage)) ||
+        solCandidates[0];
       if (!sol) throw new Error('No Solana wallet available for X402');
       // Require signMessage support
-      const canSignMessage = typeof sol.signMessage === 'function' || (sol.signer && typeof sol.signer.signMessage === 'function');
+      const canSignMessage =
+        typeof sol.signMessage === 'function' ||
+        (sol.signer && typeof sol.signer.signMessage === 'function') ||
+        typeof sol.request === 'function';
       if (!canSignMessage) throw new Error('Solana wallet does not support signMessage');
       // Discover from (base58)
       let fromBase58: string | null = null;
+      // Prefer existing connection info first to avoid provider 'request' internals
       try {
-        if (typeof sol.connect === 'function') {
-          const con = await sol.connect();
-          fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null;
-        }
+        fromBase58 = sol?.publicKey?.toBase58?.() || sol?.publicKey || null;
       } catch {}
       if (!fromBase58) {
         try {
-          fromBase58 = sol?.publicKey?.toBase58?.() || sol?.publicKey || null;
+          if (typeof sol.connect === 'function') {
+            const con = await sol.connect();
+            fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null;
+          }
         } catch {}
       }
       if (!fromBase58 || typeof fromBase58 !== 'string') {
@@ -203,10 +218,77 @@ export async function buildAndSignX402PaymentHeader(
       const message = new Uint8Array(msgParts.reduce((s, p) => s + p.length, 0));
       { let o = 0; for (const p of msgParts) { message.set(p, o); o += p.length; } }
       // Sign message
-      const sigResp = typeof sol.signMessage === 'function'
-        ? await sol.signMessage(message, 'utf8')
-        : await sol.signer.signMessage(message, 'utf8');
-      const signatureBytes: Uint8Array = (sigResp?.signature && (sigResp.signature as Uint8Array)) || (Array.isArray(sigResp) ? new Uint8Array(sigResp) : (sigResp as Uint8Array));
+      // Try multiple signMessage call styles for compatibility
+      let sigResp: any = null;
+      let signErr: any = null;
+      // Prefer Phantom/native signMessage when available (expects Uint8Array)
+      if (typeof sol.signMessage === 'function') {
+        try { sigResp = await sol.signMessage(message); } catch (e1) {
+          signErr = e1;
+          try { sigResp = await sol.signMessage(message, 'utf8'); } catch (e2) { signErr = e2; }
+        }
+      }
+      if (!sigResp && sol?.signer && typeof sol.signer.signMessage === 'function') {
+        try { sigResp = await sol.signer.signMessage(message); } catch (e3) {
+          signErr = e3;
+          try { sigResp = await sol.signer.signMessage(message, 'utf8'); } catch (e4) { signErr = e4; }
+        }
+      }
+      // Do not use sol.request fallback; some wallets throw "Unsupported path". Require native signMessage.
+      if (!sigResp) {
+        throw signErr || new Error('signMessage failed');
+      }
+      // Normalize signature: accept Uint8Array, number[], or base58/base64 string
+      const decodeBase58 = (s: string): Uint8Array => {
+        const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        const ALPHABET_MAP: Record<string, number> = {};
+        for (let i = 0; i < ALPHABET.length; i++) ALPHABET_MAP[ALPHABET.charAt(i)] = i;
+        if (s.length === 0) return new Uint8Array();
+        let zeros = 0;
+        while (zeros < s.length && s[zeros] === '1') zeros++;
+        const size = Math.ceil(s.length * 733 / 1000) + 1; // log(58)/log(256) ~ 0.733
+        const b256 = new Uint8Array(size);
+        let length = 0;
+        for (let i = zeros; i < s.length; i++) {
+          const ch = s[i];
+          const val = ALPHABET_MAP[ch];
+          if (val === undefined) throw new Error('Invalid base58 character');
+          let carry = val;
+          let j = 0;
+          for (let k = size - 1; (carry !== 0 || j < length) && k >= 0; k--, j++) {
+            carry += 58 * b256[k];
+            b256[k] = carry % 256;
+            carry = Math.floor(carry / 256);
+          }
+          length = j;
+        }
+        let it = size - length;
+        while (it < size && b256[it] === 0) it++;
+        const out = new Uint8Array(zeros + (size - it));
+        let p = 0;
+        for (let i = 0; i < zeros; i++) out[p++] = 0;
+        while (it < size) out[p++] = b256[it++];
+        return out;
+      };
+      let signatureBytes: Uint8Array;
+      if (sigResp?.signature) {
+        const s = sigResp.signature;
+        if (s instanceof Uint8Array) signatureBytes = s;
+        else if (Array.isArray(s)) signatureBytes = new Uint8Array(s as number[]);
+        else if (typeof s === 'string') {
+          // Try base64, then base58
+          try { signatureBytes = new Uint8Array(Buffer.from(s, 'base64')); }
+          catch { signatureBytes = decodeBase58(s); }
+        } else {
+          throw new Error('Unsupported signature format');
+        }
+      } else if (sigResp instanceof Uint8Array) {
+        signatureBytes = sigResp;
+      } else if (Array.isArray(sigResp)) {
+        signatureBytes = new Uint8Array(sigResp as number[]);
+      } else {
+        throw new Error('Invalid signMessage response');
+      }
       const signatureB64 = (() => {
         try { return btoa(String.fromCharCode(...Array.from(signatureBytes))); } catch { return Buffer.from(signatureBytes).toString('base64'); }
       })();
