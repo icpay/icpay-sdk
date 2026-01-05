@@ -1072,8 +1072,11 @@ export class Icpay {
       debugLog(this.config.debug || false, 'evm from account', { owner });
 
       const ZERO = '0x0000000000000000000000000000000000000000';
-      const recipientRaw = String((params.request as any)?.recipientAddress || '').trim();
-      const recipient = /^0x[a-fA-F0-9]{40}$/.test(recipientRaw) ? recipientRaw : ZERO;
+      const reqAny: any = params.request as any;
+      const recipientPrimary = String(reqAny?.recipientAddress || '').trim();
+      const recipientFromMap = String((reqAny?.recipientAddresses || {})?.evm || '').trim();
+      const recipientCandidate = recipientPrimary || recipientFromMap;
+      const recipient = /^0x[a-fA-F0-9]{40}$/.test(recipientCandidate) ? recipientCandidate : ZERO;
       if (isNative) {
         const externalCostStr = (params.request as any)?.__externalCostAmount;
         const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
