@@ -2183,6 +2183,7 @@ export class Icpay {
                     try { const con = await (sol as any).connect({ onlyIfTrusted: false }); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
                   }
                   if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
+                  // No ICPay popups; only wallet UI should be shown for signing
                   if (signableMsgB64) {
                     // Sign the provided message and settle via header (services will submit)
                     // Ensure explicit connect prompt before signing
@@ -2193,7 +2194,27 @@ export class Icpay {
                     const msgBytes = u8FromBase64(signableMsgB64);
                     const msgB58ForReq = base58Encode(msgBytes);
                     // Attempts in order (strict):
-                    // 1) Native: signMessage(Uint8Array)
+                    // 1) Wallet Standard: request colon form with Uint8Array
+                    if (!sigB64 && (sol as any)?.request) {
+                      try {
+                        try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'solana:signMessage', shape: 'object{message:Uint8Array}', len: msgBytes.length }); } catch {}
+                        const r0: any = await (sol as any).request({ method: 'solana:signMessage', params: { message: msgBytes } });
+                        if (typeof r0 === 'string') {
+                          try { const b = base58Decode(r0); sigB64 = b64FromBytes(b); } catch { sigB64 = r0; }
+                        } else if (r0 && typeof r0.signature === 'string') {
+                          try { const b = base58Decode(r0.signature); sigB64 = b64FromBytes(b); } catch { sigB64 = r0.signature; }
+                        } else if (r0 && (r0.byteLength != null || ArrayBuffer.isView(r0))) {
+                          const b = r0 instanceof Uint8Array ? r0 : new Uint8Array(r0 as ArrayBufferLike);
+                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
+                        } else if (r0 && typeof r0 === 'object' && Array.isArray((r0 as any).data)) {
+                          const b = Uint8Array.from(((r0 as any).data as number[]));
+                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
+                        }
+                      } catch (e0) {
+                        try { debugLog(this.config?.debug || false, 'sol solana:signMessage failed', { error: String(e0) }); } catch {}
+                      }
+                    }
+                    // 2) Native: signMessage(Uint8Array)
                     if (!sigB64 && typeof (sol as any)?.signMessage === 'function') {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(fn) Uint8Array'); } catch {}
@@ -2211,7 +2232,27 @@ export class Icpay {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(fn) failed', { error: String(e2) }); } catch {}
                       }
                     }
-                    // 2) Request: signMessage with base58
+                    // 3) Request: signMessage with Uint8Array payload (legacy method name)
+                    if (!sigB64 && (sol as any)?.request) {
+                      try {
+                        try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'signMessage', shape: 'object{message:Uint8Array}', len: msgBytes.length }); } catch {}
+                        const r3: any = await (sol as any).request({ method: 'signMessage', params: { message: msgBytes } });
+                        if (typeof r3 === 'string') {
+                          try { const b = base58Decode(r3); sigB64 = b64FromBytes(b); } catch { sigB64 = r3; }
+                        } else if (r3 && typeof r3.signature === 'string') {
+                          try { const b = base58Decode(r3.signature); sigB64 = b64FromBytes(b); } catch { sigB64 = r3.signature; }
+                        } else if (r3 && (r3.byteLength != null || ArrayBuffer.isView(r3))) {
+                          const b = r3 instanceof Uint8Array ? r3 : new Uint8Array(r3 as ArrayBufferLike);
+                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
+                        } else if (r3 && typeof r3 === 'object' && Array.isArray((r3 as any).data)) {
+                          const b = Uint8Array.from(((r3 as any).data as number[]));
+                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
+                        }
+                      } catch (e3) {
+                        try { debugLog(this.config?.debug || false, 'sol signMessage(request Uint8Array) failed', { error: String(e3) }); } catch {}
+                      }
+                    }
+                    // 4) Request: signMessage with base58
                     if (!sigB64 && (sol as any)?.request) {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'signMessage', shape: 'object{message:base58}', len: msgB58ForReq.length }); } catch {}
@@ -2323,70 +2364,52 @@ export class Icpay {
                       if (typeof (sol as any)?.connect === 'function') {
                         try { await (sol as any).connect({ onlyIfTrusted: false }); } catch {}
                       }
-                      // First, try signAndSendTransaction to trigger wallet popup
-                      let submittedSigFallback: string | null = null;
-                      if ((sol as any)?.request) {
-                        try {
-                          let rs: any = null;
-                          // Try legacy 'message' base58 form first (some wallets expect this)
-                          try {
-                            const txBytes0 = u8FromBase64(__fallbackTxBase64);
-                            const txB58_0 = base58Encode(txBytes0);
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'object{message:base58}', msgLen: txB58_0.length }); } catch {}
-                            rs = await (sol as any).request({ method: 'signAndSendTransaction', params: { message: txB58_0 } });
-                          } catch {}
-                          // Prefer object form with Uint8Array first
-                          try {
-                            const txBytes = u8FromBase64(__fallbackTxBase64);
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'solana_signAndSendTransaction', shape: 'object{transaction:Uint8Array}', txLen: txBytes.length }); } catch {}
-                            rs = await (sol as any).request({ method: 'solana_signAndSendTransaction', params: { transaction: txBytes } });
-                          } catch {}
-                          if (!rs) {
-                            try {
-                              const txBytes = u8FromBase64(__fallbackTxBase64);
-                              try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'object{transaction:Uint8Array}', txLen: txBytes.length }); } catch {}
-                              rs = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: txBytes } });
-                            } catch {}
-                          }
-                          // Wallet Standard with base64
-                          if (!rs) {
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'solana_signAndSendTransaction', shape: 'object{transaction:base64}', txLen: __fallbackTxBase64.length }); } catch {}
-                            try { rs = await (sol as any).request({ method: 'solana_signAndSendTransaction', params: { transaction: __fallbackTxBase64 } }); } catch {}
-                          }
-                          // Legacy shapes
-                          if (!rs) {
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'string(base64)', txLen: __fallbackTxBase64.length }); } catch {}
-                            try { rs = await (sol as any).request({ method: 'signAndSendTransaction', params: __fallbackTxBase64 as any }); } catch {}
-                          }
-                          if (!rs) {
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'array[string]', txLen: __fallbackTxBase64.length }); } catch {}
-                            try { rs = await (sol as any).request({ method: 'signAndSendTransaction', params: [__fallbackTxBase64] as any }); } catch {}
-                          }
-                          if (!rs) {
-                            try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'object{transaction:base64}', txLen: __fallbackTxBase64.length }); } catch {}
-                            rs = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: __fallbackTxBase64 } });
-                          }
-                          if (typeof rs === 'string') submittedSigFallback = rs;
-                          else if (rs && typeof rs.signature === 'string') submittedSigFallback = rs.signature;
-                          else if (rs && Array.isArray(rs.signatures) && typeof rs.signatures[0] === 'string') submittedSigFallback = rs.signatures[0];
-                        } catch {}
-                      }
-                      if (submittedSigFallback) {
-                        // Wallet submitted; wait for terminal status
-                        try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                        const waitedSolDirectFb = await this.awaitIntentTerminal({
-                          paymentIntentId,
-                          ledgerCanisterId: ledgerCanisterId,
-                          amount: String((requirement as any)?.maxAmountRequired || usdAmount || '0'),
-                          metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_sol_sig: submittedSigFallback },
-                        });
-                        this.emitMethodSuccess('createPaymentX402Usd', waitedSolDirectFb);
-                        return waitedSolDirectFb;
-                      }
-                      // Try signTransaction with message:base58 (prefer) then transaction:base64
+                      // Do NOT submit from wallet; only sign, then relay to backend
+                      // Try signAllTransactions (array) then signTransaction with message:base58 (prefer) then transaction:base64
                       if ((sol as any)?.request) {
                         try {
                           let r: any = null;
+                          // 0) Try Wallet Standard signAllTransactions with Uint8Array
+                          try {
+                            const txBytes = u8FromBase64(__fallbackTxBase64);
+                            try { debugLog(this.config?.debug || false, 'sol signAllTransactions(request) params', { method: 'solana:signAllTransactions', shape: 'object{transactions:Uint8Array[]}', count: 1, txLen: txBytes.length }); } catch {}
+                            r = await (sol as any).request({ method: 'solana:signAllTransactions', params: { transactions: [txBytes] } });
+                          } catch {}
+                          // 0b) Legacy signAllTransactions with Uint8Array
+                          if (!r) {
+                            try {
+                              const txBytes = u8FromBase64(__fallbackTxBase64);
+                              try { debugLog(this.config?.debug || false, 'sol signAllTransactions(request) params', { method: 'signAllTransactions', shape: 'object{transactions:Uint8Array[]}', count: 1, txLen: txBytes.length }); } catch {}
+                              r = await (sol as any).request({ method: 'signAllTransactions', params: { transactions: [txBytes] } });
+                            } catch {}
+                          }
+                          // 0c) signAllTransactions with base64 strings
+                          if (!r) {
+                            try { debugLog(this.config?.debug || false, 'sol signAllTransactions(request) params', { method: 'solana:signAllTransactions', shape: 'object{transactions:base64[]}', count: 1, txLen: __fallbackTxBase64.length }); } catch {}
+                            try { r = await (sol as any).request({ method: 'solana:signAllTransactions', params: { transactions: [__fallbackTxBase64] } }); } catch {}
+                          }
+                          if (!r) {
+                            try { debugLog(this.config?.debug || false, 'sol signAllTransactions(request) params', { method: 'signAllTransactions', shape: 'object{transactions:base64[]}', count: 1, txLen: __fallbackTxBase64.length }); } catch {}
+                            try { r = await (sol as any).request({ method: 'signAllTransactions', params: { transactions: [__fallbackTxBase64] } }); } catch {}
+                          }
+                          if (r) {
+                            // Normalize array responses
+                            const arr = Array.isArray(r) ? r : (Array.isArray((r as any)?.transactions) ? (r as any).transactions : null);
+                            if (arr && arr.length > 0) {
+                              const first = arr[0];
+                              if (typeof first === 'string') {
+                                const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(first) && first.length % 4 === 0;
+                                if (looksBase64) signedTxB64 = first;
+                              } else if (first && (first.byteLength != null || ArrayBuffer.isView(first))) {
+                                const b = first instanceof Uint8Array ? first : new Uint8Array(first as ArrayBufferLike);
+                                // If it's a raw signature (64 bytes) treat as signature; otherwise treat as signed tx bytes
+                                if (b.length === 64) signerSigBase58 = base58Encode(b); else signedTxB64 = b64FromBytes(b);
+                              }
+                            }
+                          }
+                          if (signedTxB64 || signerSigBase58) {
+                            // short-circuit to relay below
+                          }
                           // 1) Try message: base58 (string form first)
                           if (inlineMsgB58Fallback) {
                             try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'signTransaction', paramShape: 'message:string(base58)', msgLen: inlineMsgB58Fallback.length }); } catch {}
@@ -2431,8 +2454,8 @@ export class Icpay {
                           // 2) If still nothing, try transaction: base64
                           if (!signedTxB64 && !signerSigBase58) {
                             // Wallet Standard first
-                            try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'solana_signTransaction', paramShape: 'object{transaction:base64}', txLen: __fallbackTxBase64.length }); } catch {}
-                            try { r = await (sol as any).request({ method: 'solana_signTransaction', params: { transaction: __fallbackTxBase64 } }); } catch {}
+                            try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'solana:signTransaction', paramShape: 'object{transaction:base64}', txLen: __fallbackTxBase64.length }); } catch {}
+                            try { r = await (sol as any).request({ method: 'solana:signTransaction', params: { transaction: __fallbackTxBase64 } }); } catch {}
                             let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
                             if (typeof candidate === 'string') {
                               const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
@@ -2546,59 +2569,7 @@ export class Icpay {
                       msgB58Len: msgB58?.length || 0,
                     });
                   } catch {}
-                  // First, try native submit via request API variants
-                  let submittedSig: string | null = null;
-                  if ((sol as any)?.request) {
-                    try {
-                      // Some wallets expect a bare string or an array rather than an object
-                      // Try legacy 'message' base58 form first if available
-                      try {
-                        const txBytes0 = u8FromBase64(txBase64);
-                        const txB58_0 = base58Encode(txBytes0);
-                        try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'object{message:base58}', msgLen: txB58_0.length }); } catch {}
-                        const rs0: any = await (sol as any).request({ method: 'signAndSendTransaction', params: { message: (inlineMsgB58 || txB58_0) } });
-                        if (typeof rs0 === 'string') submittedSig = rs0;
-                        else if (rs0 && typeof rs0.signature === 'string') submittedSig = rs0.signature;
-                        else if (rs0 && Array.isArray(rs0.signatures) && typeof rs0.signatures[0] === 'string') submittedSig = rs0.signatures[0];
-                      } catch {}
-                      try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'string(base64)', txLen: txBase64.length }); } catch {}
-                      let rs: any = null;
-                      try {
-                        rs = await (sol as any).request({ method: 'signAndSendTransaction', params: txBase64 as any });
-                      } catch (e1) {
-                        try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(string) failed', { error: String(e1) }); } catch {}
-                        try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'array[string]', txLen: txBase64.length }); } catch {}
-                        try {
-                          rs = await (sol as any).request({ method: 'signAndSendTransaction', params: [txBase64] as any });
-                        } catch (e2) {
-                          try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(array) failed', { error: String(e2) }); } catch {}
-                          try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) params', { method: 'signAndSendTransaction', shape: 'object{transaction}', txLen: txBase64.length }); } catch {}
-                          rs = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: txBase64 } });
-                        }
-                      }
-                      try {
-                        const rawKeys = rs && typeof rs === 'object' ? Object.keys(rs || {}) : [];
-                        debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) raw result', { hasResult: !!rs, rawKeys });
-                      } catch {}
-                      if (typeof rs === 'string') submittedSig = rs;
-                      else if (rs && typeof rs.signature === 'string') submittedSig = rs.signature;
-                      else if (rs && Array.isArray(rs.signatures) && typeof rs.signatures[0] === 'string') submittedSig = rs.signatures[0];
-                    } catch (eSend) {
-                      try { debugLog(this.config?.debug || false, 'sol signAndSendTransaction(request) failed', { error: String(eSend) }); } catch {}
-                    }
-                  }
-                  if (submittedSig) {
-                    // Wallet submitted; wait for terminal status server-side
-                    try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                    const waitedSolDirect = await this.awaitIntentTerminal({
-                      paymentIntentId,
-                      ledgerCanisterId: ledgerCanisterId,
-                      amount: String((requirement as any)?.maxAmountRequired || usdAmount || '0'),
-                      metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_sol_sig: submittedSig },
-                    });
-                    this.emitMethodSuccess('createPaymentX402Usd', waitedSolDirect);
-                    return waitedSolDirect;
-                  }
+                  // Do NOT submit from wallet; only sign, then relay to backend
                   // For wallets that require request-based signing
                   const preferTransactionSigning = true;
                   // Try to sign using transaction MESSAGE first (wallets often expect base58 message)
@@ -2607,6 +2578,18 @@ export class Icpay {
                       let r: any = null;
                       // Some wallets expect bare string or array for message
                       if (msgB58) {
+                        // Ensure a visible connect prompt if required by the wallet
+                        if (typeof (sol as any)?.connect === 'function') {
+                          try { await (sol as any).connect({ onlyIfTrusted: false }); } catch {}
+                        }
+                        // Prefer object form with Uint8Array message first
+                        try {
+                          const msgBytesU8 = (() => { try { return base58Decode(msgB58); } catch { return new Uint8Array(); } })();
+                          if (msgBytesU8.length > 0) {
+                            try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'signTransaction', paramShape: 'object{message:Uint8Array}', msgLen: msgBytesU8.length }); } catch {}
+                            r = await (sol as any).request({ method: 'signTransaction', params: { message: msgBytesU8 } });
+                          }
+                        } catch {}
                         try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'signTransaction', paramShape: 'message:string(base58)', msgLen: msgB58.length }); } catch {}
                         try {
                           r = await (sol as any).request({ method: 'signTransaction', params: msgB58 as any });
@@ -2644,10 +2627,23 @@ export class Icpay {
                       }
                     } catch {}
                   }
-                  // If message-based did not yield, try transaction base64 (some wallets accept this)
+                  // If message-based did not yield, try transaction (prefer Uint8Array), then base64 (some wallets accept this)
                   if (!signedTxB64 && !signerSigBase58 && (sol as any)?.request) {
                     try {
                       let r: any = null;
+                      // Prefer Uint8Array object form first to trigger wallet UI
+                      try {
+                        const txBytesU8 = u8FromBase64(txBase64);
+                        try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'signTransaction', paramShape: 'object{transaction:Uint8Array}', txLen: txBytesU8.length }); } catch {}
+                        r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBytesU8 } });
+                      } catch {}
+                      if (!r) {
+                        try {
+                          const txBytesU8b = u8FromBase64(txBase64);
+                          try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'solana:signTransaction', paramShape: 'object{transaction:Uint8Array}', txLen: txBytesU8b.length }); } catch {}
+                          r = await (sol as any).request({ method: 'solana:signTransaction', params: { transaction: txBytesU8b } });
+                        } catch {}
+                      }
                       // Try string param, then array, then object
                       try { debugLog(this.config?.debug || false, 'sol signTransaction(request) params', { method: 'signTransaction', paramShape: 'transaction:string(base64)', txLen: txBase64.length }); } catch {}
                       try {
@@ -2674,6 +2670,7 @@ export class Icpay {
                       }
                     } catch {}
                   }
+                  // No hosted signer fallback; rely on wallet API only
                   // Prefer signMessage path only if explicitly allowed (disabled by default)
                   try {
                     const signableMsgB64: string | undefined = (requirement as any)?.extra?.signableMessageBase64;
