@@ -2154,73 +2154,83 @@ export class Icpay {
                       details: { note: 'API must include extra.transactionBase64 to avoid prepare' }
                     });
                   }
+                  // Sign-only with wallet, then relay server-side (fee payer = relayer)
                   let signedTxB64: string | null = null;
-                  // Prefer provider's signAndSendTransaction with base58 "message" if provided
-                  const inlineMsgB58: string | undefined = (requirement as any)?.extra?.messageBase58;
-                  const msgB58 = inlineMsgB58 || base58Encode(u8FromBase64(txBase64));
                   if ((sol as any)?.request) {
                     try {
-                      const r = await (sol as any).request({ method: 'signAndSendTransaction', params: { message: msgB58 } });
-                      // Some providers return signature; server relays not needed in that case, but we still pass as transactionId
-                      const sigMaybe = (r && (r.signature || r)) as string;
-                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
-                        // If a signature is returned, treat it as signed+submitted and proceed to await terminal
-                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                        const finalQuick = await this.awaitIntentTerminal({
-                          paymentIntentId,
-                          transactionId: sigMaybe,
-                          ledgerCanisterId: ledgerCanisterId,
-                          amount: (requirement as any)?.maxAmountRequired || '0',
-                          metadata: { ...(request.metadata || {}), icpay_x402: true },
-                        });
-                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
-                        return finalQuick;
-                      }
+                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } });
+                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
                     }
-                  } else if (typeof (sol as any)?.signAndSendTransaction === 'function') {
-                    try {
-                      const r2 = await (sol as any).signAndSendTransaction({ message: msgB58 });
-                      const sigMaybe = (r2 && (r2.signature || r2)) as string;
-                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
-                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                        const finalQuick = await this.awaitIntentTerminal({
-                          paymentIntentId,
-                          transactionId: sigMaybe,
-                          ledgerCanisterId: ledgerCanisterId,
-                          amount: (requirement as any)?.maxAmountRequired || '0',
-                          metadata: { ...(request.metadata || {}), icpay_x402: true },
-                        });
-                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
-                        return finalQuick;
-                      }
-                    } catch (e) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
+                  } else if (typeof (sol as any)?.signTransaction === 'function') {
+                    let r2: any = null;
+                    try { r2 = await (sol as any).signTransaction({ transaction: txBase64 }); } catch {}
+                    if (!r2) {
+                      try { r2 = await (sol as any).signTransaction(u8FromBase64(txBase64)); } catch {}
                     }
+                    signedTxB64 = (r2?.signedTransaction || r2?.transaction || r2) as string;
+                  } else {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signTransaction' });
                   }
-                  // As a last resort, some providers accept base64 "transaction" param under signAndSendTransaction
-                  if ((sol as any)?.request) {
-                    try {
-                      const r3 = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: txBase64 } });
-                      const sigMaybe = (r3 && (r3.signature || r3)) as string;
-                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
-                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                        const finalQuick = await this.awaitIntentTerminal({
-                          paymentIntentId,
-                          transactionId: sigMaybe,
-                          ledgerCanisterId: ledgerCanisterId,
-                          amount: (requirement as any)?.maxAmountRequired || '0',
-                          metadata: { ...(request.metadata || {}), icpay_x402: true },
-                        });
-                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
-                        return finalQuick;
-                      }
-                    } catch (e) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
-                    }
+                  if (!signedTxB64 || typeof signedTxB64 !== 'string') {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Missing signed transaction' });
                   }
-                  throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signAndSendTransaction' });
+                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                    paymentIntentId,
+                    signedTransactionBase64: signedTxB64,
+                    rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
+                  });
+                  try {
+                    debugLog(this.config?.debug || false, 'x402 (sol) settle response (relay via services)', {
+                      ok: (settleResp as any)?.ok,
+                      status: (settleResp as any)?.status,
+                      paymentIntentId: (settleResp as any)?.paymentIntent?.id,
+                      paymentId: (settleResp as any)?.payment?.id,
+                      rawKeys: Object.keys(settleResp || {}),
+                    });
+                  } catch {}
+                  // Move to "Payment confirmation" stage (after relayer submission)
+                  try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                  const statusSol = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
+                  const amountSol =
+                    (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
+                    (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+                  const outSol = {
+                    transactionId: Number(settleResp?.canisterTxId || 0),
+                    status: statusSol === 'succeeded' ? 'completed' : statusSol,
+                    amount: amountSol,
+                    recipientCanister: ledgerCanisterId,
+                    timestamp: new Date(),
+                    metadata: { ...(request.metadata || {}), icpay_x402: true },
+                    payment: settleResp || null,
+                  } as any;
+                  // Do not fallback to normal flow for Solana x402; surface failure
+                  const isTerminalSol = (() => {
+                    const s = String(outSol.status || '').toLowerCase();
+                    return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
+                  })();
+                  if (isTerminalSol) {
+                    if (outSol.status === 'completed') {
+                      this.emit('icpay-sdk-transaction-completed', outSol);
+                    } else if (outSol.status === 'failed') {
+                      this.emit('icpay-sdk-transaction-failed', outSol);
+                    } else {
+                      this.emit('icpay-sdk-transaction-updated', outSol);
+                    }
+                    this.emitMethodSuccess('createPaymentX402Usd', outSol);
+                    return outSol;
+                  }
+                  // Non-terminal: wait until terminal via notify loop
+                  try { this.emit('icpay-sdk-transaction-updated', outSol); } catch {}
+                  const waitedSol = await this.awaitIntentTerminal({
+                    paymentIntentId,
+                    ledgerCanisterId: ledgerCanisterId,
+                    amount: amountSol,
+                    metadata: { ...(request.metadata || {}), icpay_x402: true },
+                  });
+                  this.emitMethodSuccess('createPaymentX402Usd', waitedSol);
+                  return waitedSol;
                 }
                 // EVM: server-side settlement
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
