@@ -2215,10 +2215,35 @@ export class Icpay {
                       msgB58Len: msgB58?.length || 0,
                     });
                   } catch {}
-                  // Prefer signMessage path when server provides signableMessageBase64
+                  // For Solana x402 we prefer transaction signing exclusively (server builds SPL transfer)
+                  const preferTransactionSigning = true;
+                  // Try to sign the provided transaction first (most wallets prefer transaction signing)
+                  if (!signedTxB64 && (sol as any)?.request) {
+                    try {
+                      let r: any = null;
+                      // Prefer passing transaction as base64
+                      try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } }); } catch {}
+                      // Fallback: pass base58
+                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: msgB58 } }); } catch {} }
+                      // Legacy: message base58
+                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {} }
+                      // Legacy: message as array-of-bytes
+                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { message: Array.from(u8FromBase64(txBase64)) } }); } catch {} }
+                      let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
+                      if (typeof candidate === 'string') {
+                        const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
+                        if (looksBase64) signedTxB64 = candidate; else signerSigBase58 = candidate;
+                      } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
+                        try { const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike); if (b.length === 64) signerSigBase58 = base58Encode(b); } catch {}
+                      } else if (candidate && typeof candidate === 'object' && Array.isArray((candidate as any).data)) {
+                        try { const b = Uint8Array.from((candidate as any).data as number[]); if (b.length === 64) signerSigBase58 = base58Encode(b); } catch {}
+                      }
+                    } catch {}
+                  }
+                  // Prefer signMessage path only if explicitly allowed (disabled by default)
                   try {
                     const signableMsgB64: string | undefined = (requirement as any)?.extra?.signableMessageBase64;
-                    if (signableMsgB64) {
+                    if (!preferTransactionSigning && !signedTxB64 && !signerSigBase58 && signableMsgB64) {
                       const message = u8FromBase64(signableMsgB64);
                       let sigResp: any = null;
                       let signErr: any = null;
@@ -2374,88 +2399,8 @@ export class Icpay {
                       }
                     }
                   } catch {}
-                  // If signable message is provided and we still have no signature, do not attempt transaction signing; fail early
-                  try {
-                    const hasSignable = !!((requirement as any)?.extra?.signableMessageBase64);
-                    if (hasSignable && !signedTxB64 && !signerSigBase58) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet did not sign message' });
-                    }
-                  } catch (e) {
-                    if (e instanceof IcpayError) { throw e; }
-                  }
-                  if (!signedTxB64 && !signerSigBase58 && (sol as any)?.request) {
-                    try {
-                      // Try common param shapes in order of most widely supported
-                      let r: any = null;
-                      // 1) transaction: base64
-                      try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } }); } catch {}
-                      // 2) transaction: base58
-                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: msgB58 } }); } catch {} }
-                      // 3) message: base58 (legacy)
-                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {} }
-                      // 4) message: array-of-bytes
-                      if (!r) {
-                        try {
-                          const arr = Array.from(u8FromBase64(txBase64));
-                          r = await (sol as any).request({ method: 'signTransaction', params: { message: arr } });
-                        } catch {}
-                      }
-                      let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
-                      try {
-                        debugLog(this.config?.debug || false, 'sol signTransaction(request) candidate(message)', {
-                          type: typeof candidate,
-                          len: (typeof candidate === 'string' ? candidate.length : null),
-                          hasByteLength: !!(candidate && (candidate.byteLength != null)),
-                          isBufferLike: !!(candidate && typeof candidate === 'object' && Array.isArray((candidate as any).data)),
-                        });
-                      } catch {}
-                      // If wallet wrapped the payload under known fields, unwrap
-                      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
-                        const obj = candidate as any;
-                        const keys = Object.keys(obj || {});
-                        try { debugLog(this.config?.debug || false, 'sol candidate object keys', { keys }); } catch {}
-                        // Prefer explicit fields
-                        if (typeof obj.signedTransaction !== 'undefined') candidate = obj.signedTransaction;
-                        else if (typeof obj.transaction !== 'undefined') candidate = obj.transaction;
-                        else if (typeof obj.serialized !== 'undefined') candidate = obj.serialized;
-                        else if (typeof obj.signedMessage !== 'undefined') candidate = obj.signedMessage;
-                        else if (typeof obj.message !== 'undefined') candidate = obj.message;
-                        else if (typeof obj.signature !== 'undefined') candidate = obj.signature; // base58 signature, not full tx
-                        // Some wallets return { signatures: [base58Signature] }
-                        if (!signedTxB64 && !signerSigBase58 && Array.isArray(obj.signatures) && obj.signatures.length > 0 && typeof obj.signatures[0] === 'string') {
-                          signerSigBase58 = obj.signatures[0] as string;
-                        }
-                      }
-                      if (typeof candidate === 'string') {
-                        const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
-                        if (looksBase64) {
-                          signedTxB64 = candidate;
-                        } else {
-                          // Treat as signature base58 (not full tx)
-                          signerSigBase58 = candidate;
-                        }
-                      } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
-                        // If this looks like a 64-byte signature, convert to base58 and treat as signature-only
-                        try {
-                          const bytes = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
-                          if (bytes && bytes.length === 64) {
-                            signerSigBase58 = base58Encode(bytes);
-                          }
-                        } catch {}
-                      } else if (candidate && typeof candidate === 'object' && Array.isArray((candidate as any).data)) {
-                        // Node Buffer-like { data: number[] }
-                        try {
-                          const bytes = Uint8Array.from((candidate as any).data as number[]);
-                          if (bytes && bytes.length === 64) {
-                            signerSigBase58 = base58Encode(bytes);
-                          }
-                        } catch {}
-                      }
-                      // Skip additional request variants to avoid double prompts
-                    } catch (e) {
-                      // Do not throw yet; allow other variants to run
-                    }
-                  } else if (!signedTxB64 && !signerSigBase58 && typeof (sol as any)?.signTransaction === 'function') {
+                  // No second prompt: skip additional request variants; try direct signTransaction function once if available
+                  if (!signedTxB64 && !signerSigBase58 && typeof (sol as any)?.signTransaction === 'function') {
                     // Some providers expose direct signTransaction; try with base58 "message" if supported
                     let r2: any = null;
                     // Try passing the transaction bytes in multiple shapes
