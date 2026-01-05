@@ -61,16 +61,6 @@ function u8FromBase64(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return arr;
 }
-function b64FromU8(bytes: Uint8Array): string {
-  try {
-    const Buf = (globalThis as any).Buffer;
-    if (Buf) return Buf.from(bytes).toString('base64');
-  } catch {}
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  const btoaFn = (globalThis as any)?.btoa;
-  return btoaFn ? btoaFn(bin) : '';
-}
 
 export class Icpay {
   private config: IcpayConfig;
@@ -2231,64 +2221,6 @@ export class Icpay {
                     }
                   }
                   throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signAndSendTransaction' });
-                  if (!signedTxB64 || typeof signedTxB64 !== 'string') {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Missing signed transaction' });
-                  }
-                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
-                    paymentIntentId,
-                    signedTransactionBase64: signedTxB64,
-                    rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
-                  });
-                  try {
-                    debugLog(this.config?.debug || false, 'x402 (sol) settle response (relay via services)', {
-                      ok: (settleResp as any)?.ok,
-                      status: (settleResp as any)?.status,
-                      paymentIntentId: (settleResp as any)?.paymentIntent?.id,
-                      paymentId: (settleResp as any)?.payment?.id,
-                      rawKeys: Object.keys(settleResp || {}),
-                    });
-                  } catch {}
-                  // Move to "Payment confirmation" stage (after relayer submission)
-                  try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
-                  const statusSol = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
-                  const amountSol =
-                    (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
-                    (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
-                  const outSol = {
-                    transactionId: Number(settleResp?.canisterTxId || 0),
-                    status: statusSol === 'succeeded' ? 'completed' : statusSol,
-                    amount: amountSol,
-                    recipientCanister: ledgerCanisterId,
-                    timestamp: new Date(),
-                    metadata: { ...(request.metadata || {}), icpay_x402: true },
-                    payment: settleResp || null,
-                  } as any;
-                  // Do not fallback to normal flow for Solana x402; surface failure
-                  const isTerminalSol = (() => {
-                    const s = String(outSol.status || '').toLowerCase();
-                    return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
-                  })();
-                  if (isTerminalSol) {
-                    if (outSol.status === 'completed') {
-                      this.emit('icpay-sdk-transaction-completed', outSol);
-                    } else if (outSol.status === 'failed') {
-                      this.emit('icpay-sdk-transaction-failed', outSol);
-                    } else {
-                      this.emit('icpay-sdk-transaction-updated', outSol);
-                    }
-                    this.emitMethodSuccess('createPaymentX402Usd', outSol);
-                    return outSol;
-                  }
-                  // Non-terminal: wait until terminal via notify loop
-                  try { this.emit('icpay-sdk-transaction-updated', outSol); } catch {}
-                  const waitedSol = await this.awaitIntentTerminal({
-                    paymentIntentId,
-                    ledgerCanisterId: ledgerCanisterId,
-                    amount: amountSol,
-                    metadata: { ...(request.metadata || {}), icpay_x402: true },
-                  });
-                  this.emitMethodSuccess('createPaymentX402Usd', waitedSol);
-                  return waitedSol;
                 }
                 // EVM: server-side settlement
                 try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
