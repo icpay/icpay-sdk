@@ -1,4 +1,4 @@
-import { buildAndSignX402PaymentHeader } from './x402/builders';
+import { buildAndSignX402PaymentHeader, buildX402HeaderFromAuthorization } from './x402/builders';
 import {
   IcpayConfig,
   CreateTransactionRequest,
@@ -50,6 +50,45 @@ function base58Encode(bytes: Uint8Array): string {
   for (let k = 0; k < zeros; k++) out += '1';
   for (let q = digits.length - 1; q >= 0; q--) out += B58_ALPHABET[digits[q]];
   return out;
+}
+function base58Decode(s: string): Uint8Array {
+  if (!s || s.length === 0) return new Uint8Array(0);
+  const MAP: { [k: string]: number } = {};
+  for (let i = 0; i < B58_ALPHABET.length; i++) MAP[B58_ALPHABET.charAt(i)] = i;
+  let zeros = 0;
+  while (zeros < s.length && s.charAt(zeros) === '1') zeros++;
+  const bytes: number[] = [0];
+  for (let i = zeros; i < s.length; i++) {
+    const ch = s.charAt(i);
+    const val = MAP[ch];
+    if (val === undefined) throw new Error('invalid base58');
+    let carry = val;
+    for (let j = 0; j < bytes.length; j++) {
+      const prev = bytes[j] as number;
+      const x = (prev * 58) + (carry as number);
+      bytes[j] = x & 0xff;
+      carry = x >> 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  const outArr = new Uint8Array(zeros + bytes.length);
+  let p = 0;
+  for (; p < zeros; p++) outArr[p] = 0;
+  for (let q = bytes.length - 1; q >= 0; q--) outArr[p++] = (bytes[q] == null ? 0 : (bytes[q] as number));
+  return outArr;
+}
+function b64FromBytes(bytes: Uint8Array): string {
+  try {
+    const Buf = (globalThis as any).Buffer;
+    if (Buf) return Buf.from(bytes).toString('base64');
+  } catch {}
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  // btoa expects binary string
+  return (globalThis as any)?.btoa ? (globalThis as any).btoa(bin) : '';
 }
 function u8FromBase64(b64: string): Uint8Array {
   try {
@@ -2176,9 +2215,191 @@ export class Icpay {
                       msgB58Len: msgB58?.length || 0,
                     });
                   } catch {}
-                  if ((sol as any)?.request) {
+                  // Prefer signMessage path when server provides signableMessageBase64
+                  try {
+                    const signableMsgB64: string | undefined = (requirement as any)?.extra?.signableMessageBase64;
+                    if (signableMsgB64) {
+                      const message = u8FromBase64(signableMsgB64);
+                      let sigResp: any = null;
+                      let signErr: any = null;
+                      try { debugLog(this.config?.debug || false, 'sol signMessage attempts begin', { hasBuffer: !!(globalThis as any).Buffer, msgLen: message.length }); } catch {}
+                      // A) Direct signMessage with Buffer first (some wallets require Buffer)
+                      if (typeof (sol as any)?.signMessage === 'function') {
+                        try {
+                          const Buf = (globalThis as any).Buffer;
+                          if (Buf) {
+                            try { debugLog(this.config?.debug || false, 'sol signMessage(Buffer)'); } catch {}
+                            sigResp = await (sol as any).signMessage(Buf.from(message));
+                          }
+                        } catch (eA) { signErr = eA; try { debugLog(this.config?.debug || false, 'sol signMessage(Buffer) failed', { error: String(eA) }); } catch {} }
+                      }
+                      // B) Direct signMessage with Uint8Array
+                      if (!sigResp && typeof (sol as any)?.signMessage === 'function') {
+                        try { try { debugLog(this.config?.debug || false, 'sol signMessage(Uint8Array)'); } catch {}; sigResp = await (sol as any).signMessage(message); } catch (eB) { signErr = eB; try { debugLog(this.config?.debug || false, 'sol signMessage(Uint8Array) failed', { error: String(eB) }); } catch {} }
+                      }
+                      // C) Direct signer.signMessage if present
+                      if (!sigResp && (sol as any)?.signer && typeof (sol as any).signer.signMessage === 'function') {
+                        try { try { debugLog(this.config?.debug || false, 'sol signer.signMessage(Uint8Array)'); } catch {}; sigResp = await (sol as any).signer.signMessage(message); } catch (eC) { signErr = eC; try { debugLog(this.config?.debug || false, 'sol signer.signMessage failed', { error: String(eC) }); } catch {} }
+                      }
+                      // D) Wallet-standard request with array-of-bytes
+                      if (!sigResp && (sol as any)?.request) {
+                        try { try { debugLog(this.config?.debug || false, 'sol request signMessage(array-of-bytes)'); } catch {}; const arr = Array.from(message); sigResp = await (sol as any).request({ method: 'signMessage', params: { message: arr, display: 'hex' } }); } catch (eD) { signErr = eD; try { debugLog(this.config?.debug || false, 'sol request signMessage(array-of-bytes) failed', { error: String(eD) }); } catch {} }
+                      }
+                      // E) Wallet-standard request with base58 message
+                      if (!sigResp && (sol as any)?.request) {
+                        try { try { debugLog(this.config?.debug || false, 'sol request signMessage(base58)'); } catch {}; const msgB58ForReq = base58Encode(message); sigResp = await (sol as any).request({ method: 'signMessage', params: { message: msgB58ForReq, display: 'hex' } }); } catch (eE) { signErr = eE; try { debugLog(this.config?.debug || false, 'sol request signMessage(base58) failed', { error: String(eE) }); } catch {} }
+                      }
+                      let messageSigB64: string | null = null;
+                      if (sigResp) {
+                        // Normalize common shapes: Uint8Array, Buffer-like, base58/base64 string, or { signature }
+                        if (typeof sigResp === 'string') {
+                          // Could be base58 or base64; try base58 first
+                          try {
+                            const asBytes = base58Decode(sigResp);
+                            messageSigB64 = b64FromBytes(asBytes);
+                          } catch {
+                            // assume base64 already
+                            messageSigB64 = sigResp;
+                          }
+                        } else if (sigResp && (sigResp.byteLength != null || ArrayBuffer.isView(sigResp))) {
+                          try {
+                            const bytes = sigResp instanceof Uint8Array ? sigResp : new Uint8Array(sigResp as ArrayBufferLike);
+                            if (bytes && bytes.length === 64) {
+                              messageSigB64 = b64FromBytes(bytes);
+                            }
+                          } catch {}
+                        } else if (sigResp && typeof sigResp === 'object') {
+                          const obj = sigResp as any;
+                          if (typeof obj.signature === 'string') {
+                            try {
+                              const asBytes = base58Decode(obj.signature);
+                              messageSigB64 = b64FromBytes(asBytes);
+                            } catch {
+                              messageSigB64 = obj.signature;
+                            }
+                          } else if (Array.isArray(obj.data)) {
+                            try {
+                              const bytes = Uint8Array.from(obj.data as number[]);
+                              if (bytes && bytes.length === 64) {
+                                messageSigB64 = b64FromBytes(bytes);
+                              }
+                            } catch {}
+                          }
+                        }
+                        try {
+                          debugLog(this.config?.debug || false, 'sol signMessage result normalized (message signature)', {
+                            hasSignature: !!messageSigB64,
+                            signatureLen: messageSigB64 ? messageSigB64.length : null,
+                          });
+                        } catch {}
+                      } else if (signErr) {
+                        try { debugLog(this.config?.debug || false, 'sol signMessage failed (all attempts)', { error: String(signErr) }); } catch {}
+                      }
+                      // If we obtained a message signature, construct x402 header and settle via API
+                      if (messageSigB64) {
+                        const fields = ((requirement as any)?.extra?.signableFields || {}) as any;
+                        const header = buildX402HeaderFromAuthorization({
+                          x402Version: Number((requirement as any)?.x402Version || (data?.x402Version || 2)),
+                          scheme: String((requirement as any)?.scheme || 'exact'),
+                          network: String((requirement as any)?.network || ''),
+                          from: String(fromBase58 || ''),
+                          to: String((requirement as any)?.payTo || ''),
+                          value: String((requirement as any)?.maxAmountRequired || '0'),
+                          validAfter: String(fields?.validAfter || '0'),
+                          validBefore: String(fields?.validBefore || '0'),
+                          nonce: String(fields?.nonceHex || ''),
+                          signature: String(messageSigB64),
+                        });
+                        const headerJson = JSON.stringify(header);
+                        let headerB64: string;
+                        try {
+                          const Buf = (globalThis as any).Buffer;
+                          headerB64 = Buf ? Buf.from(headerJson, 'utf8').toString('base64') : (globalThis as any)?.btoa?.(headerJson) || '';
+                        } catch { headerB64 = ''; }
+                        if (headerB64) {
+                          try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                          const settleRespSol: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
+                            paymentIntentId,
+                            paymentHeader: headerB64,
+                            paymentRequirements: requirement,
+                          });
+                          try {
+                            debugLog(this.config?.debug || false, 'x402 (sol) settle via header response', {
+                              ok: (settleRespSol as any)?.ok,
+                              status: (settleRespSol as any)?.status,
+                              paymentIntentId: (settleRespSol as any)?.paymentIntent?.id,
+                              paymentId: (settleRespSol as any)?.payment?.id,
+                              rawKeys: Object.keys(settleRespSol || {}),
+                            });
+                          } catch {}
+                          const statusSolHdr = (settleRespSol?.status || settleRespSol?.paymentIntent?.status || 'completed').toString().toLowerCase();
+                          const amountSolHdr =
+                            (settleRespSol?.paymentIntent?.amount && String(settleRespSol.paymentIntent.amount)) ||
+                            (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+                          const outSolHdr = {
+                            transactionId: Number(settleRespSol?.canisterTxId || 0),
+                            status: statusSolHdr === 'succeeded' ? 'completed' : statusSolHdr,
+                            amount: amountSolHdr,
+                            recipientCanister: ledgerCanisterId,
+                            timestamp: new Date(),
+                            metadata: { ...(request.metadata || {}), icpay_x402: true },
+                            payment: settleRespSol || null,
+                          } as any;
+                          const isTerminalSolHdr = (() => {
+                            const s = String(outSolHdr.status || '').toLowerCase();
+                            return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
+                          })();
+                          if (isTerminalSolHdr) {
+                            if (outSolHdr.status === 'completed') {
+                              this.emit('icpay-sdk-transaction-completed', outSolHdr);
+                            } else if (outSolHdr.status === 'failed') {
+                              this.emit('icpay-sdk-transaction-failed', outSolHdr);
+                            } else {
+                              this.emit('icpay-sdk-transaction-updated', outSolHdr);
+                            }
+                            this.emitMethodSuccess('createPaymentX402Usd', outSolHdr);
+                            return outSolHdr;
+                          }
+                          // Non-terminal: wait until terminal via notify loop
+                          try { this.emit('icpay-sdk-transaction-updated', outSolHdr); } catch {}
+                          const waitedSolHdr = await this.awaitIntentTerminal({
+                            paymentIntentId,
+                            ledgerCanisterId: ledgerCanisterId,
+                            amount: amountSolHdr,
+                            metadata: { ...(request.metadata || {}), icpay_x402: true },
+                          });
+                          this.emitMethodSuccess('createPaymentX402Usd', waitedSolHdr);
+                          return waitedSolHdr;
+                        }
+                      }
+                    }
+                  } catch {}
+                  // If signable message is provided and we still have no signature, do not attempt transaction signing; fail early
+                  try {
+                    const hasSignable = !!((requirement as any)?.extra?.signableMessageBase64);
+                    if (hasSignable && !signedTxB64 && !signerSigBase58) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet did not sign message' });
+                    }
+                  } catch (e) {
+                    if (e instanceof IcpayError) { throw e; }
+                  }
+                  if (!signedTxB64 && !signerSigBase58 && (sol as any)?.request) {
                     try {
-                      const r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } });
+                      // Try common param shapes in order of most widely supported
+                      let r: any = null;
+                      // 1) transaction: base64
+                      try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } }); } catch {}
+                      // 2) transaction: base58
+                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: msgB58 } }); } catch {} }
+                      // 3) message: base58 (legacy)
+                      if (!r) { try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {} }
+                      // 4) message: array-of-bytes
+                      if (!r) {
+                        try {
+                          const arr = Array.from(u8FromBase64(txBase64));
+                          r = await (sol as any).request({ method: 'signTransaction', params: { message: arr } });
+                        } catch {}
+                      }
                       let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
                       try {
                         debugLog(this.config?.debug || false, 'sol signTransaction(request) candidate(message)', {
@@ -2193,11 +2414,17 @@ export class Icpay {
                         const obj = candidate as any;
                         const keys = Object.keys(obj || {});
                         try { debugLog(this.config?.debug || false, 'sol candidate object keys', { keys }); } catch {}
+                        // Prefer explicit fields
                         if (typeof obj.signedTransaction !== 'undefined') candidate = obj.signedTransaction;
                         else if (typeof obj.transaction !== 'undefined') candidate = obj.transaction;
+                        else if (typeof obj.serialized !== 'undefined') candidate = obj.serialized;
                         else if (typeof obj.signedMessage !== 'undefined') candidate = obj.signedMessage;
                         else if (typeof obj.message !== 'undefined') candidate = obj.message;
                         else if (typeof obj.signature !== 'undefined') candidate = obj.signature; // base58 signature, not full tx
+                        // Some wallets return { signatures: [base58Signature] }
+                        if (!signedTxB64 && !signerSigBase58 && Array.isArray(obj.signatures) && obj.signatures.length > 0 && typeof obj.signatures[0] === 'string') {
+                          signerSigBase58 = obj.signatures[0] as string;
+                        }
                       }
                       if (typeof candidate === 'string') {
                         const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
@@ -2226,12 +2453,15 @@ export class Icpay {
                       }
                       // Skip additional request variants to avoid double prompts
                     } catch (e) {
-                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
+                      // Do not throw yet; allow other variants to run
                     }
-                  } else if (typeof (sol as any)?.signTransaction === 'function') {
+                  } else if (!signedTxB64 && !signerSigBase58 && typeof (sol as any)?.signTransaction === 'function') {
                     // Some providers expose direct signTransaction; try with base58 "message" if supported
                     let r2: any = null;
-                    try { r2 = await (sol as any).signTransaction({ message: msgB58 }); } catch {}
+                    // Try passing the transaction bytes in multiple shapes
+                    try { r2 = await (sol as any).signTransaction({ transaction: txBase64 }); } catch {}
+                    if (!r2) { try { r2 = await (sol as any).signTransaction({ transaction: msgB58 }); } catch {} }
+                    if (!r2) { try { r2 = await (sol as any).signTransaction({ message: msgB58 }); } catch {} }
                     try { debugLog(this.config?.debug || false, 'sol signTransaction(fn) result(message)', { hasResult: !!r2, keys: Object.keys(r2 || {}) }); } catch {}
                     // Base58-only path: do not try transaction(base64) or Uint8Array variants
                     signedTxB64 = (r2?.signedTransaction || r2?.transaction || r2) as string;
