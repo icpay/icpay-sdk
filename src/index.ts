@@ -2139,6 +2139,15 @@ export class Icpay {
                   // Get public key (already connected from widget)
                   let fromBase58: string | null = null;
                   try { fromBase58 = sol?.publicKey?.toBase58?.() || sol?.publicKey || null; } catch {}
+                  try {
+                    debugLog(this.config?.debug || false, 'sol provider caps', {
+                      hasRequest: !!(sol as any)?.request,
+                      hasSignTransaction: typeof (sol as any)?.signTransaction === 'function',
+                      hasSignAndSendTransaction: typeof (sol as any)?.signAndSendTransaction === 'function',
+                      isPhantom: !!(sol as any)?.isPhantom,
+                      hasPublicKey: !!fromBase58,
+                    });
+                  } catch {}
                   if (!fromBase58 && typeof sol.connect === 'function') {
                     try { const con = await sol.connect(); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
                   }
@@ -2155,32 +2164,99 @@ export class Icpay {
                     });
                   }
                   // Sign-only with wallet, then relay server-side (fee payer = relayer)
+                  // Prefer request-based signTransaction with base58 "message" (serialized tx bytes)
                   let signedTxB64: string | null = null;
+                  let signerSigBase58: string | null = null;
+                  const inlineMsgB58: string | undefined = (requirement as any)?.extra?.messageBase58;
+                  const msgB58 = inlineMsgB58 || base58Encode(u8FromBase64(txBase64));
+                  try {
+                    debugLog(this.config?.debug || false, 'sol x402 payload sizes', {
+                      txBase64Len: txBase64?.length || 0,
+                      hasInlineMsgB58: !!inlineMsgB58,
+                      msgB58Len: msgB58?.length || 0,
+                    });
+                  } catch {}
                   if ((sol as any)?.request) {
                     try {
-                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } });
-                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
+                      const r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } });
+                      let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
+                      try {
+                        debugLog(this.config?.debug || false, 'sol signTransaction(request) candidate(message)', {
+                          type: typeof candidate,
+                          len: (typeof candidate === 'string' ? candidate.length : null),
+                          hasByteLength: !!(candidate && (candidate.byteLength != null)),
+                          isBufferLike: !!(candidate && typeof candidate === 'object' && Array.isArray((candidate as any).data)),
+                        });
+                      } catch {}
+                      // If wallet wrapped the payload under known fields, unwrap
+                      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                        const obj = candidate as any;
+                        const keys = Object.keys(obj || {});
+                        try { debugLog(this.config?.debug || false, 'sol candidate object keys', { keys }); } catch {}
+                        if (typeof obj.signedTransaction !== 'undefined') candidate = obj.signedTransaction;
+                        else if (typeof obj.transaction !== 'undefined') candidate = obj.transaction;
+                        else if (typeof obj.signedMessage !== 'undefined') candidate = obj.signedMessage;
+                        else if (typeof obj.message !== 'undefined') candidate = obj.message;
+                        else if (typeof obj.signature !== 'undefined') candidate = obj.signature; // base58 signature, not full tx
+                      }
+                      if (typeof candidate === 'string') {
+                        const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
+                        if (looksBase64) {
+                          signedTxB64 = candidate;
+                        } else {
+                          // Treat as signature base58 (not full tx)
+                          signerSigBase58 = candidate;
+                        }
+                      } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
+                        // If this looks like a 64-byte signature, convert to base58 and treat as signature-only
+                        try {
+                          const bytes = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
+                          if (bytes && bytes.length === 64) {
+                            signerSigBase58 = base58Encode(bytes);
+                          }
+                        } catch {}
+                      } else if (candidate && typeof candidate === 'object' && Array.isArray((candidate as any).data)) {
+                        // Node Buffer-like { data: number[] }
+                        try {
+                          const bytes = Uint8Array.from((candidate as any).data as number[]);
+                          if (bytes && bytes.length === 64) {
+                            signerSigBase58 = base58Encode(bytes);
+                          }
+                        } catch {}
+                      }
+                      // Skip additional request variants to avoid double prompts
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
                     }
                   } else if (typeof (sol as any)?.signTransaction === 'function') {
+                    // Some providers expose direct signTransaction; try with base58 "message" if supported
                     let r2: any = null;
-                    try { r2 = await (sol as any).signTransaction({ transaction: txBase64 }); } catch {}
-                    if (!r2) {
-                      try { r2 = await (sol as any).signTransaction(u8FromBase64(txBase64)); } catch {}
-                    }
+                    try { r2 = await (sol as any).signTransaction({ message: msgB58 }); } catch {}
+                    try { debugLog(this.config?.debug || false, 'sol signTransaction(fn) result(message)', { hasResult: !!r2, keys: Object.keys(r2 || {}) }); } catch {}
+                    // Base58-only path: do not try transaction(base64) or Uint8Array variants
                     signedTxB64 = (r2?.signedTransaction || r2?.transaction || r2) as string;
                   } else {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signTransaction' });
                   }
-                  if (!signedTxB64 || typeof signedTxB64 !== 'string') {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Missing signed transaction' });
+                  let settleResp: any;
+                  if (signedTxB64 && typeof signedTxB64 === 'string') {
+                    settleResp = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                      paymentIntentId,
+                      signedTransactionBase64: signedTxB64,
+                      rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
+                    });
+                  } else if (signerSigBase58) {
+                    // Relay signature + unsigned tx; server will attach and co-sign
+                    settleResp = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                      paymentIntentId,
+                      signatureBase58: signerSigBase58,
+                      transactionBase64: txBase64,
+                      payerPublicKey: fromBase58,
+                      rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
+                    });
+                  } else {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet did not return a signed transaction' });
                   }
-                  const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
-                    paymentIntentId,
-                    signedTransactionBase64: signedTxB64,
-                    rpcUrlPublic: (requirement as any)?.extra?.rpcUrlPublic || null,
-                  });
                   try {
                     debugLog(this.config?.debug || false, 'x402 (sol) settle response (relay via services)', {
                       ok: (settleResp as any)?.ok,
