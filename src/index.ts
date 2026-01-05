@@ -61,6 +61,16 @@ function u8FromBase64(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return arr;
 }
+function b64FromU8(bytes: Uint8Array): string {
+  try {
+    const Buf = (globalThis as any).Buffer;
+    if (Buf) return Buf.from(bytes).toString('base64');
+  } catch {}
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const btoaFn = (globalThis as any)?.btoa;
+  return btoaFn ? btoaFn(bin) : '';
+}
 
 export class Icpay {
   private config: IcpayConfig;
@@ -2155,24 +2165,72 @@ export class Icpay {
                     });
                   }
                   let signedTxB64: string | null = null;
+                  // Prefer provider's signAndSendTransaction with base58 "message" if provided
+                  const inlineMsgB58: string | undefined = (requirement as any)?.extra?.messageBase58;
+                  const msgB58 = inlineMsgB58 || base58Encode(u8FromBase64(txBase64));
                   if ((sol as any)?.request) {
                     try {
-                      const r = await (sol as any).request({ method: 'signTransaction', params: { transaction: txBase64 } });
-                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
+                      const r = await (sol as any).request({ method: 'signAndSendTransaction', params: { message: msgB58 } });
+                      // Some providers return signature; server relays not needed in that case, but we still pass as transactionId
+                      const sigMaybe = (r && (r.signature || r)) as string;
+                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
+                        // If a signature is returned, treat it as signed+submitted and proceed to await terminal
+                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                        const finalQuick = await this.awaitIntentTerminal({
+                          paymentIntentId,
+                          transactionId: sigMaybe,
+                          ledgerCanisterId: ledgerCanisterId,
+                          amount: (requirement as any)?.maxAmountRequired || '0',
+                          metadata: { ...(request.metadata || {}), icpay_x402: true },
+                        });
+                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
+                        return finalQuick;
+                      }
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
                     }
-                  } else if (typeof (sol as any)?.signTransaction === 'function') {
-                    // Some wallets expose direct signTransaction expecting a deserialized tx; best-effort: pass base64 if supported
+                  } else if (typeof (sol as any)?.signAndSendTransaction === 'function') {
                     try {
-                      const r = await (sol as any).signTransaction({ transaction: txBase64 });
-                      signedTxB64 = (r?.signedTransaction || r?.transaction || r) as string;
+                      const r2 = await (sol as any).signAndSendTransaction({ message: msgB58 });
+                      const sigMaybe = (r2 && (r2.signature || r2)) as string;
+                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
+                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                        const finalQuick = await this.awaitIntentTerminal({
+                          paymentIntentId,
+                          transactionId: sigMaybe,
+                          ledgerCanisterId: ledgerCanisterId,
+                          amount: (requirement as any)?.maxAmountRequired || '0',
+                          metadata: { ...(request.metadata || {}), icpay_x402: true },
+                        });
+                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
+                        return finalQuick;
+                      }
                     } catch (e) {
                       throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
                     }
-                  } else {
-                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signTransaction' });
                   }
+                  // As a last resort, some providers accept base64 "transaction" param under signAndSendTransaction
+                  if ((sol as any)?.request) {
+                    try {
+                      const r3 = await (sol as any).request({ method: 'signAndSendTransaction', params: { transaction: txBase64 } });
+                      const sigMaybe = (r3 && (r3.signature || r3)) as string;
+                      if (typeof sigMaybe === 'string' && sigMaybe.length > 0) {
+                        try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                        const finalQuick = await this.awaitIntentTerminal({
+                          paymentIntentId,
+                          transactionId: sigMaybe,
+                          ledgerCanisterId: ledgerCanisterId,
+                          amount: (requirement as any)?.maxAmountRequired || '0',
+                          metadata: { ...(request.metadata || {}), icpay_x402: true },
+                        });
+                        this.emitMethodSuccess('createPaymentX402Usd', finalQuick);
+                        return finalQuick;
+                      }
+                    } catch (e) {
+                      throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet refused to sign transaction', details: e });
+                    }
+                  }
+                  throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana wallet does not support signAndSendTransaction' });
                   if (!signedTxB64 || typeof signedTxB64 !== 'string') {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Missing signed transaction' });
                   }
