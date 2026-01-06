@@ -2165,6 +2165,112 @@ export class Icpay {
                   ? ((this.config as any)?.solanaProvider || (globalThis as any)?.solana || (globalThis as any)?.phantom?.solana)
                   : ((this.config as any)?.evmProvider || (globalThis as any)?.ethereum);
                 let paymentHeader: string | null = null;
+                // IC x402: client-side settle via allowance + canister pull
+                const isIc = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('icp:');
+                if (isIc) {
+                  // IC x402: client ensures allowance; then call API settle so services (controller) pulls and notifies
+                  if (!this.actorProvider) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'actorProvider required for IC x402' });
+                  }
+                  // Ensure allowance first
+                  const asset = String((requirement as any)?.asset || (requirement as any)?.payTo || '').trim();
+                  const amountStr = String((requirement as any)?.maxAmountRequired || '0');
+                  const amountBn = BigInt(amountStr);
+                  if (!asset || amountBn <= 0n) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.API_ERROR, message: 'Invalid x402 IC requirement (asset/amount)' });
+                  }
+                  // Approve spender (ICPay canister) for amount
+                  if (!this.icpayCanisterId) {
+                    // Prefer payTo from x402 requirement as ICPay canister id if present
+                    try {
+                      const maybe = String((requirement as any)?.payTo || '');
+                      if (maybe) {
+                        // Validate shape by attempting to parse
+                        Principal.fromText(maybe);
+                        this.icpayCanisterId = maybe;
+                      }
+                    } catch {}
+                  }
+                  if (!this.icpayCanisterId) {
+                    // Fallback to account lookup
+                    const acctInfo = await this.fetchAccountInfo();
+                    this.icpayCanisterId = (acctInfo as any)?.icpayCanisterId?.toString?.() || this.icpayCanisterId;
+                  }
+                  if (!this.icpayCanisterId) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing ICPay canister id for IC x402' });
+                  }
+                  const ledgerActor = this.actorProvider(asset, ledgerIdl);
+                  try {
+                    await ledgerActor.icrc2_approve({
+                      fee: [],
+                      memo: [],
+                      from_subaccount: [],
+                      created_at_time: [],
+                      amount: amountBn,
+                      expected_allowance: [],
+                      expires_at: [],
+                      spender: { owner: Principal.fromText(this.icpayCanisterId), subaccount: [] },
+                    });
+                  } catch (apprErr: any) {
+                    throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'ICRC-2 approve failed', details: apprErr });
+                  }
+                  // Obtain payer principal if available
+                  let payerPrincipal: string | null = null;
+                  try {
+                    const p = this.wallet.getPrincipal();
+                    if (p) payerPrincipal = p.toText();
+                    else if (this.connectedWallet && typeof this.connectedWallet.getPrincipal === 'function') {
+                      const maybe = await this.connectedWallet.getPrincipal();
+                      if (typeof maybe === 'string') payerPrincipal = maybe;
+                    } else if (this.connectedWallet?.principal) {
+                      payerPrincipal = String(this.connectedWallet.principal);
+                    }
+                  } catch {}
+                  // Call API to settle IC x402 via services (controller will pull + notify)
+                  const settleRespIc: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
+                    paymentIntentId,
+                    paymentHeader: null, // not used for IC allowance path
+                    paymentRequirements: requirement,
+                    payerPrincipal,
+                  });
+                  const statusIc = (settleRespIc?.status || settleRespIc?.paymentIntent?.status || 'completed').toString().toLowerCase();
+                  const amountIc =
+                    (settleRespIc?.paymentIntent?.amount && String(settleRespIc.paymentIntent.amount)) ||
+                    (typeof usdAmount === 'number' ? String(usdAmount) : (request as any)?.amount?.toString?.() || '0');
+                  const outIc = {
+                    transactionId: Number(settleRespIc?.canisterTxId || 0),
+                    status: statusIc === 'succeeded' ? 'completed' : statusIc,
+                    amount: amountIc,
+                    recipientCanister: this.icpayCanisterId,
+                    timestamp: new Date(),
+                    metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_network: 'ic' },
+                    payment: settleRespIc || null,
+                  } as any;
+                  const isTerminalIc = (() => {
+                    const s = String(outIc.status || '').toLowerCase();
+                    return s === 'completed' || s === 'succeeded' || s === 'failed' || s === 'canceled' || s === 'cancelled' || s === 'mismatched';
+                  })();
+                  if (isTerminalIc) {
+                    if (outIc.status === 'completed') {
+                      this.emit('icpay-sdk-transaction-completed', outIc);
+                    } else if (outIc.status === 'failed') {
+                      this.emit('icpay-sdk-transaction-failed', outIc);
+                    } else {
+                      this.emit('icpay-sdk-transaction-updated', outIc);
+                    }
+                    this.emitMethodSuccess('createPaymentX402Usd', outIc);
+                    return outIc;
+                  }
+                  try { this.emit('icpay-sdk-transaction-updated', outIc); } catch {}
+                  const waitedIc = await this.awaitIntentTerminal({
+                    paymentIntentId,
+                    ledgerCanisterId: asset,
+                    amount: amountIc,
+                    metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_network: 'ic' },
+                  });
+                  this.emitMethodSuccess('createPaymentX402Usd', waitedIc);
+                  return waitedIc;
+                }
                 if (!isSol) {
                   paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
                     x402Version: Number(data?.x402Version || 2),
