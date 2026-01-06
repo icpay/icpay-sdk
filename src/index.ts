@@ -2201,12 +2201,19 @@ export class Icpay {
                   }
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
+                    // Fetch transfer fee and approve amount + fee to avoid InsufficientAllowance
+                    let feeBn = 0n;
+                    try {
+                      const f = await ledgerActor.icrc1_fee();
+                      feeBn = typeof f === 'bigint' ? f : BigInt(f);
+                    } catch {}
+                    const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                     await ledgerActor.icrc2_approve({
                       fee: [],
                       memo: [],
                       from_subaccount: [],
                       created_at_time: [],
-                      amount: amountBn,
+                      amount: approveAmount,
                       expected_allowance: [],
                       expires_at: [],
                       spender: { owner: Principal.fromText(this.icpayCanisterId), subaccount: [] },
