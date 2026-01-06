@@ -2233,12 +2233,26 @@ export class Icpay {
                       payerPrincipal = String(this.connectedWallet.principal);
                     }
                   } catch {}
+                  // Build memo from accountCanisterId and intentCode for matching on services
+                  let memoBytes: number[] | undefined = undefined;
+                  try {
+                    const extra: any = (requirement as any)?.extra || {};
+                    const accIdStr = String(extra?.accountCanisterId || '');
+                    const icIntentCodeStr = String(extra?.intentCode || '');
+                    const accIdNum = accIdStr ? parseInt(accIdStr, 10) : 0;
+                    const icIntentCodeNum = icIntentCodeStr ? parseInt(icIntentCodeStr, 10) : 0;
+                    if (Number.isFinite(accIdNum) && accIdNum > 0 && Number.isFinite(icIntentCodeNum) && icIntentCodeNum > 0) {
+                      const packed = this.createPackedMemo(accIdNum, icIntentCodeNum);
+                      memoBytes = Array.from(packed);
+                    }
+                  } catch {}
                   // Call API to settle IC x402 via services (controller will pull + notify)
                   const settleRespIc: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                     paymentIntentId,
                     paymentHeader: null, // not used for IC allowance path
                     paymentRequirements: requirement,
                     payerPrincipal,
+                    memoBytes: memoBytes || null,
                   });
                   const statusIc = (settleRespIc?.status || settleRespIc?.paymentIntent?.status || 'completed').toString().toLowerCase();
                   const amountIc =
