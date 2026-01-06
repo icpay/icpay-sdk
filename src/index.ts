@@ -2287,6 +2287,7 @@ export class Icpay {
                     paymentIntentId,
                     ledgerCanisterId: asset,
                     amount: amountIc,
+                    canisterTransactionId: String(settleRespIc?.canisterTxId || ''),
                     metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_network: 'ic' },
                   });
                   this.emitMethodSuccess('createPaymentX402Usd', waitedIc);
