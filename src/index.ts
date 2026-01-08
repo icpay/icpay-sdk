@@ -1277,7 +1277,8 @@ export class Icpay {
       // Resolve ledgerCanisterId from symbol if needed (legacy). If tokenShortcode provided, no resolution required.
       let ledgerCanisterId = request.ledgerCanisterId;
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
-      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol) {
+      const isOnrampFlow = ((request as any)?.onrampPayment === true) || ((this as any)?.config?.onrampPayment === true);
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
           message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated).',
@@ -1332,7 +1333,7 @@ export class Icpay {
             } catch {}
           }
         }
-        if (!expectedSenderPrincipal) {
+        if (!expectedSenderPrincipal && !(((request as any)?.onrampPayment === true) || ((this as any)?.config?.onrampPayment === true))) {
           throw new IcpayError({
             code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED,
             message: 'Wallet must be connected to create payment intent',
@@ -1367,25 +1368,36 @@ export class Icpay {
             externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
           });
         } else {
-          intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
-            amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
-            // Prefer tokenShortcode if provided
-            tokenShortcode: tokenShortcode || undefined,
-            // Legacy fields for backwards compatibility
-            symbol: tokenShortcode ? undefined : (request as any).symbol,
-            ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
-            description: (request as any).description,
-            expectedSenderPrincipal,
-            metadata: request.metadata || {},
-            amountUsd: (request as any).amountUsd,
-            // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
-            chainId: tokenShortcode ? undefined : (request as any).chainId,
-            onrampPayment: onramp || undefined,
-            widgetParams: request.widgetParams || undefined,
-            recipientAddress,
-            recipientAddresses: (request as any)?.recipientAddresses || undefined,
-            externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
-          });
+          if (onramp) {
+            // Route onramp flows to the dedicated onramp endpoint without requiring token/ledger
+            intentResp = await this.publicApiClient.post('/sdk/public/onramp/intents', {
+              usdAmount: (request as any).amountUsd,
+              description: (request as any).description,
+              metadata: request.metadata || {},
+              widgetParams: request.widgetParams || undefined,
+              recipientAddress,
+              recipientAddresses: (request as any)?.recipientAddresses || undefined,
+            });
+          } else {
+            intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
+              amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
+              // Prefer tokenShortcode if provided
+              tokenShortcode: tokenShortcode || undefined,
+              // Legacy fields for backwards compatibility
+              symbol: tokenShortcode ? undefined : (request as any).symbol,
+              ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
+              description: (request as any).description,
+              expectedSenderPrincipal,
+              metadata: request.metadata || {},
+              amountUsd: (request as any).amountUsd,
+              // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
+              chainId: tokenShortcode ? undefined : (request as any).chainId,
+              widgetParams: request.widgetParams || undefined,
+              recipientAddress,
+              recipientAddresses: (request as any)?.recipientAddresses || undefined,
+              externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
+            });
+          }
         }
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
@@ -2032,7 +2044,8 @@ export class Icpay {
       // If tokenShortcode provided, skip canister resolution; otherwise resolve from symbol if needed
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
       let ledgerCanisterId = request.ledgerCanisterId;
-      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol) {
+      const isOnrampFlow = (request as any)?.onrampPayment === true || (this as any)?.config?.onrampPayment === true;
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
           message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated).',
