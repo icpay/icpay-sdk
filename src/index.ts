@@ -125,7 +125,7 @@ export class Icpay {
       debug: false,
       enableEvents: true,
       ...config,
-      onrampDisabled: true,
+      onrampDisabled: false,
     };
 
     debugLog(this.config.debug || false, 'constructor', { config: this.config });
