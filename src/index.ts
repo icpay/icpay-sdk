@@ -1297,6 +1297,7 @@ export class Icpay {
       let intentChainId: string | number | undefined;
       let accountCanisterId: string;
       let resolvedAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
+      let intentResp: any;
       try {
         debugLog(this.config.debug || false, 'creating payment intent');
 
@@ -1355,7 +1356,6 @@ export class Icpay {
       // Choose a default to persist on the intent; EVM will override to ZERO if non-hex when building tx
       const recipientAddress = (reqAny?.recipientAddress) || candidateEvm || candidateIC || candidateSol || ZERO_ADDRESS;
       debugLog(this.config.debug || false, 'recipientAddress resolved for intent', { recipientAddress });
-        let intentResp: any;
         if (isAtxp) {
           // Route ATXP intents to the ATXP endpoint so they link to the request
           const atxpRequestId = String(meta.atxp_request_id);
@@ -1417,16 +1417,27 @@ export class Icpay {
         if (!ledgerCanisterId && intentResp?.paymentIntent?.ledgerCanisterId) {
           ledgerCanisterId = intentResp.paymentIntent.ledgerCanisterId;
         }
-        debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal, resolvedAmountStr });
-        // Emit transaction created event
+      debugLog(this.config.debug || false, 'payment intent created', { paymentIntentId, paymentIntentCode, expectedSenderPrincipal, resolvedAmountStr });
+        // Emit transaction created event only for non-onramp flows
         if (paymentIntentId) {
-          this.emit('icpay-sdk-transaction-created', {
-            paymentIntentId,
-            amount: resolvedAmountStr,
-            ledgerCanisterId,
-            expectedSenderPrincipal,
-            accountCanisterId,
-          });
+          if (!isOnrampFlow) {
+            this.emit('icpay-sdk-transaction-created', {
+              paymentIntentId,
+              amount: resolvedAmountStr,
+              ledgerCanisterId,
+              expectedSenderPrincipal,
+              accountCanisterId,
+            });
+          } else {
+            // Optional: emit an onramp-specific event for UI
+            try {
+              (this as any).emit?.('icpay-sdk-onramp-intent-created', {
+                paymentIntentId,
+                amountUsd: (request as any).amountUsd,
+                onramp: intentResp?.onramp,
+              });
+            } catch {}
+          }
         }
         (request as any).__onramp = onrampData;
         (request as any).__contractAddress = contractAddress;
@@ -1457,6 +1468,19 @@ export class Icpay {
         });
         this.emitError(err);
         throw err;
+      }
+
+      // If this is an onramp flow, do NOT proceed with chain processing. Return onramp payload instead.
+      const onrampPayload = (request as any).__onramp;
+      if (isOnrampFlow && onrampPayload) {
+        const early = {
+          paymentIntentId,
+          paymentIntentCode,
+          onramp: onrampPayload,
+          paymentIntent: intentResp?.paymentIntent || null,
+        };
+        this.emitMethodSuccess('createPayment', early);
+        return early as any;
       }
 
       const amount = BigInt(resolvedAmountStr);
