@@ -1347,15 +1347,19 @@ export class Icpay {
       const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
         const meta: any = request?.metadata || {};
         const isAtxp = Boolean(meta?.icpay_atxp_request) && typeof (meta?.atxp_request_id) === 'string';
+      // Resolve recipientAddress only for non-onramp flows
       const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
       const reqAny: any = request as any;
       const addrObj = (reqAny?.recipientAddresses) || {};
       const candidateEvm = addrObj.evm ? addrObj.evm : undefined;
       const candidateIC = addrObj.ic ? addrObj.ic : undefined;
       const candidateSol = addrObj.sol ? addrObj.sol : undefined;
-      // Choose a default to persist on the intent; EVM will override to ZERO if non-hex when building tx
-      const recipientAddress = (reqAny?.recipientAddress) || candidateEvm || candidateIC || candidateSol || ZERO_ADDRESS;
-      debugLog(this.config.debug || false, 'recipientAddress resolved for intent', { recipientAddress });
+      let recipientAddress: string | undefined = undefined;
+      if (!onramp) {
+        // Choose a default to persist on the intent; EVM will override to ZERO if non-hex when building tx
+        recipientAddress = (reqAny?.recipientAddress) || candidateEvm || candidateIC || candidateSol || ZERO_ADDRESS;
+        debugLog(this.config.debug || false, 'recipientAddress resolved for intent', { recipientAddress });
+      }
         if (isAtxp) {
           // Route ATXP intents to the ATXP endpoint so they link to the request
           const atxpRequestId = String(meta.atxp_request_id);
@@ -1375,7 +1379,6 @@ export class Icpay {
               description: (request as any).description,
               metadata: request.metadata || {},
               widgetParams: request.widgetParams || undefined,
-              recipientAddress,
               recipientAddresses: (request as any)?.recipientAddresses || undefined,
             });
           } else {
@@ -2091,6 +2094,7 @@ export class Icpay {
         widgetParams: request.widgetParams,
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
+        recipientAddresses: (request as any)?.recipientAddresses,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
