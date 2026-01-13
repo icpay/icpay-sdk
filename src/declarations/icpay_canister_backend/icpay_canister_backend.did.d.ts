@@ -208,6 +208,7 @@ export interface _SERVICE {
     [] | [PublicTxStatus]
   >,
   'get_transactions' : ActorMethod<[TransactionFilter], TransactionResult>,
+  'get_version' : ActorMethod<[], string>,
   'icrc21_canister_call_consent_message' : ActorMethod<
     [Icrc21ConsentMessageRequest],
     Icrc21ConsentMessageResponse
@@ -227,9 +228,26 @@ export interface _SERVICE {
     [Uint8Array | number[], Uint8Array | number[]],
     Result_1
   >,
+  'pay_with_allowance_v2' : ActorMethod<
+    [
+      string,
+      bigint,
+      bigint,
+      [] | [string],
+      [] | [Uint8Array | number[]],
+      [] | [bigint],
+      [] | [string],
+      [] | [Uint8Array | number[]],
+      [] | [Uint8Array | number[]],
+    ],
+    Result_1
+  >,
   'remove_account' : ActorMethod<[bigint], Result>,
   'remove_allowed_ledger' : ActorMethod<[string], Result>,
-  'request_payout' : ActorMethod<[bigint, bigint, string, bigint], Result_2>,
+  'request_payout' : ActorMethod<
+    [bigint, bigint, string, bigint, string, [] | [Uint8Array | number[]]],
+    Result_2
+  >,
   'request_refund' : ActorMethod<[bigint], Result_3>,
   'set_allowed_ledger_config' : ActorMethod<
     [string, LedgerStandard, boolean, bigint, bigint],
