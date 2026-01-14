@@ -101,6 +101,28 @@ function u8FromBase64(b64: string): Uint8Array {
   return arr;
 }
 
+// Normalize metadata so internal icpay-managed fields are nested under metadata.icpay.
+// If icpay exists, merge; otherwise create. Move known internal keys and icpay_* keys under icpay.
+function normalizeSdkMetadata(base: any): any {
+  const isObj = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
+  const incoming: any = isObj(base) ? { ...base } : {};
+  const hasGroup = isObj(incoming.icpay);
+  const INTERNAL_KEYS = ['context', 'senderPrincipal', 'onrampProvider'];
+  const moved: any = {};
+  for (const [k, v] of Object.entries(incoming)) {
+    if (INTERNAL_KEYS.includes(k) || k.startsWith('icpay_')) {
+      moved[k] = v;
+      delete incoming[k];
+    }
+  }
+  if (hasGroup) {
+    incoming.icpay = { ...(incoming.icpay || {}), ...moved };
+  } else {
+    incoming.icpay = moved;
+  }
+  return incoming;
+}
+
 export class Icpay {
   private config: IcpayConfig;
   private wallet: IcpayWallet;
@@ -1377,7 +1399,7 @@ export class Icpay {
             intentResp = await this.publicApiClient.post('/sdk/public/onramp/intents', {
               usdAmount: (request as any).amountUsd,
               description: (request as any).description,
-              metadata: request.metadata || {},
+              metadata: normalizeSdkMetadata(request.metadata || {}),
               widgetParams: request.widgetParams || undefined,
               recipientAddresses: (request as any)?.recipientAddresses || undefined,
             });
@@ -1391,7 +1413,7 @@ export class Icpay {
               ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
               description: (request as any).description,
               expectedSenderPrincipal,
-              metadata: request.metadata || {},
+              metadata: normalizeSdkMetadata(request.metadata || {}),
               amountUsd: (request as any).amountUsd,
               // With tokenShortcode, backend derives chain. Keep legacy chainId for old flows.
               chainId: tokenShortcode ? undefined : (request as any).chainId,
@@ -2138,7 +2160,7 @@ export class Icpay {
         symbol: tokenShortcode ? undefined : (request as any).symbol,
         ledgerCanisterId: tokenShortcode ? undefined : ledgerCanisterId,
         description: (request as any).description,
-        metadata: request.metadata,
+        metadata: normalizeSdkMetadata(request.metadata || {}),
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
