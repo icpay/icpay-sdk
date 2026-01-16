@@ -620,6 +620,7 @@ export class Icpay {
       case 'evm':
       case 'ethereum':
         return await this.processEvmPayment(params);
+      case 'sol':
       case 'solana':
         return await this.processSolanaPayment(params);
       case 'sui':
