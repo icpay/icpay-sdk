@@ -850,6 +850,7 @@ export class Icpay {
       paymentIntentId: paymentIntentId!,
       canisterTransactionId: (typeof canisterTransactionId === 'number' && Number.isFinite(canisterTransactionId)) ? String(canisterTransactionId) : undefined,
       ledgerCanisterId: ledgerCanisterId!,
+      ledgerBlockIndex: blockIndex,
       amount: amount.toString(),
       metadata: metadata ?? request.metadata,
     });
@@ -3254,7 +3255,7 @@ export class Icpay {
   }
 
   /** Reusable notify helper for both ledger flow and onramp */
-  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string }): Promise<any> {
+  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string; ledgerCanisterId?: string; ledgerBlockIndex?: string | number; accountCanisterId?: number; externalCostAmount?: string | number; recipientPrincipal?: string }): Promise<any> {
     const notifyClient = this.publicApiClient;
     const notifyPath = '/sdk/public/payments/notify';
     const maxAttempts = params.maxAttempts ?? 1;
@@ -3266,6 +3267,11 @@ export class Icpay {
         if (params.canisterTransactionId) body.canisterTxId = params.canisterTransactionId;
         if (params.transactionId) body.transactionId = params.transactionId;
         if (params.orderId) body.orderId = params.orderId;
+        if (params.ledgerCanisterId) body.ledgerCanisterId = params.ledgerCanisterId;
+        if (params.ledgerBlockIndex != null) body.ledgerBlockIndex = params.ledgerBlockIndex;
+        if (typeof params.accountCanisterId === 'number') body.accountCanisterId = params.accountCanisterId;
+        if (params.externalCostAmount != null) body.externalCostAmount = params.externalCostAmount;
+        if (typeof params.recipientPrincipal === 'string') body.recipientPrincipal = params.recipientPrincipal;
         const resp: any = await notifyClient.post(notifyPath, body);
         // If this is the last attempt, return whatever we got
         if (attempt === maxAttempts) {
@@ -3299,7 +3305,7 @@ export class Icpay {
   // Retries indefinitely by default, backing off modestly, and only returns
   // when status is terminal. Never throws after funds are sent unless API reports
   // an explicit failure state.
-  private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; ledgerCanisterId: string; amount: string; metadata?: any }): Promise<any> {
+  private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; ledgerCanisterId: string; ledgerBlockIndex?: string | number; amount: string; metadata?: any; accountCanisterId?: number; externalCostAmount?: string | number; recipientPrincipal?: string }): Promise<any> {
     const baseDelay = 1000;
     const maxDelay = 10000;
     let attempt = 0;
@@ -3312,6 +3318,11 @@ export class Icpay {
           transactionId: params.transactionId || (params?.metadata?.icpay_evm_tx_hash ? String(params.metadata.icpay_evm_tx_hash) : undefined),
           maxAttempts: 1,
           delayMs: 0,
+          ledgerCanisterId: params.ledgerCanisterId,
+          ledgerBlockIndex: params.ledgerBlockIndex,
+          accountCanisterId: params.accountCanisterId,
+          externalCostAmount: params.externalCostAmount,
+          recipientPrincipal: params.recipientPrincipal,
         });
         const status = (resp as any)?.paymentIntent?.status || (resp as any)?.payment?.status || (resp as any)?.status || '';
         const norm = typeof status === 'string' ? status.toLowerCase() : '';
