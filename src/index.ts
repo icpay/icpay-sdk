@@ -984,7 +984,6 @@ export class Icpay {
             if (signedTxB64) {
               relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                 signedTransactionBase64: signedTxB64,
-                rpcUrlPublic: (params.request as any)?.__rpcUrlPublic ?? null,
               });
             } else {
               relay = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
@@ -992,7 +991,6 @@ export class Icpay {
                 signatureBase58: signerSigBase58,
                 transactionBase64: prebuiltBase64,
                 payerPublicKey: payerKey,
-                rpcUrlPublic: (params.request as any)?.__rpcUrlPublic ?? null,
               });
             }
             signature = (relay && (relay.signature || relay?.txSig || relay?.txid)) || null;
