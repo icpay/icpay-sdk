@@ -893,7 +893,15 @@ export class Icpay {
         await (sol.connect ? sol.connect() : sol.request?.({ method: 'connect' }));
       }
       const pk = sol.publicKey || sol?.wallet?.publicKey;
-      payerKey = pk ? String(pk) : null;
+      if (pk && typeof pk.toBase58 === 'function') {
+        payerKey = pk.toBase58();
+      } else if (typeof pk === 'string') {
+        payerKey = pk;
+      } else if (pk && typeof pk.toString === 'function') {
+        payerKey = pk.toString();
+      } else {
+        payerKey = pk ? String(pk) : null;
+      }
     } catch {}
     if (!payerKey) {
       throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
@@ -914,6 +922,7 @@ export class Icpay {
             // Prefer sign-only flow: signTransaction, then relay via backend (avoids Phantom simulation warning)
             const msgB58 = base58Encode(u8FromBase64(prebuiltBase64));
             let signedTxB64: string | null = null;
+            let signerSigBase58: string | null = null;
             // Try multiple parameter shapes for maximum compatibility
             let r: any = null;
             try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {}
@@ -929,20 +938,63 @@ export class Icpay {
             let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
             if (typeof candidate === 'string') {
               const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
-              if (looksBase64) signedTxB64 = candidate;
+              if (looksBase64) signedTxB64 = candidate; else signerSigBase58 = candidate;
             } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
               const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
-              if (b.length > 64) signedTxB64 = b64FromBytes(b);
+              if (b.length > 64) signedTxB64 = b64FromBytes(b); else if (b.length === 64) signerSigBase58 = base58Encode(b);
             } else if (r && typeof r === 'object') {
               const obj = r as any;
               if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
+              if (!signedTxB64 && typeof obj.signature === 'string') signerSigBase58 = obj.signature;
+              if (!signedTxB64 && obj && typeof obj.serialize === 'function') {
+                try {
+                  const out = obj.serialize({ requireAllSignatures: false, verifySignatures: false });
+                  if (out && (out.byteLength != null || ArrayBuffer.isView(out))) {
+                    const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
+                    if (b.length > 64) signedTxB64 = b64FromBytes(b);
+                  }
+                } catch {}
+              }
             }
-            if (!signedTxB64) throw new Error('Wallet did not return a signed transaction');
-            // Relay via API (generic raw relay)
-            const relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
-              signedTransactionBase64: signedTxB64,
-              rpcUrlPublic: (params.request as any)?.__rpcUrlPublic ?? null,
-            });
+            // Direct provider API fallback (Phantom: signTransaction(Transaction))
+            if (!signedTxB64 && typeof (sol as any).signTransaction === 'function') {
+              try {
+                const txBytes = u8FromBase64(prebuiltBase64);
+                const stx = await (sol as any).signTransaction(txBytes as any);
+                if (stx) {
+                  if (typeof stx === 'string') {
+                    const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(stx) && stx.length % 4 === 0;
+                    if (looksBase64) signedTxB64 = stx; else signerSigBase58 = stx;
+                  } else if (stx && typeof stx.serialize === 'function') {
+                    try {
+                      const out = stx.serialize({ requireAllSignatures: false, verifySignatures: false });
+                      const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
+                      if (b.length > 64) signedTxB64 = b64FromBytes(b);
+                    } catch {}
+                  } else if (stx && (stx.byteLength != null || ArrayBuffer.isView(stx))) {
+                    const b = stx instanceof Uint8Array ? stx : new Uint8Array(stx as ArrayBufferLike);
+                    if (b.length > 64) signedTxB64 = b64FromBytes(b); else if (b.length === 64) signerSigBase58 = base58Encode(b);
+                  }
+                }
+              } catch {}
+            }
+            if (!signedTxB64 && !signerSigBase58) throw new Error('Wallet did not return a signed transaction');
+            // Relay via API
+            let relay: any;
+            if (signedTxB64) {
+              relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
+                signedTransactionBase64: signedTxB64,
+                rpcUrlPublic: (params.request as any)?.__rpcUrlPublic ?? null,
+              });
+            } else {
+              relay = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                paymentIntentId: params.paymentIntentId,
+                signatureBase58: signerSigBase58,
+                transactionBase64: prebuiltBase64,
+                payerPublicKey: payerKey,
+                rpcUrlPublic: (params.request as any)?.__rpcUrlPublic ?? null,
+              });
+            }
             signature = (relay && (relay.signature || relay?.txSig || relay?.txid)) || null;
             if (!signature) {
               // Fallback: if relay returned ok but no signature field, attempt to parse
