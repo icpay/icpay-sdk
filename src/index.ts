@@ -984,6 +984,7 @@ export class Icpay {
             if (signedTxB64) {
               relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                 signedTransactionBase64: signedTxB64,
+                paymentIntentId: params.paymentIntentId,
               });
             } else {
               relay = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
