@@ -2395,6 +2395,7 @@ export class Icpay {
                     }
                   } catch {}
                   // Call API to settle IC x402 via services (controller will pull + notify)
+                  try { this.emitMethodStart('settleX402', { paymentIntentId, network: 'ic' }); } catch {}
                   const settleRespIc: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                     paymentIntentId,
                     paymentHeader: null, // not used for IC allowance path
