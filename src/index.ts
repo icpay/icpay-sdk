@@ -2348,15 +2348,18 @@ export class Icpay {
                   if (!this.icpayCanisterId) {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing ICPay canister id for IC x402' });
                   }
+                  // Fetch fee with anonymous agent so Oisy/signer only sees icrc2_approve (ICRC-21 supports
+                  // icrc2_approve but not icrc1_fee – otherwise signer shows "UnsupportedCanisterCall: icrc1_fee")
+                  let feeBn = 0n;
+                  try {
+                    const readOnlyAgent = new HttpAgent({ host: this.icHost });
+                    const readOnlyLedger = Actor.createActor(ledgerIdl, { agent: readOnlyAgent, canisterId: asset });
+                    const f = await readOnlyLedger.icrc1_fee();
+                    feeBn = typeof f === 'bigint' ? f : BigInt(f as string | number | boolean);
+                  } catch {}
+                  const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
-                    // Fetch transfer fee and approve amount + fee to avoid InsufficientAllowance
-                    let feeBn = 0n;
-                    try {
-                      const f = await ledgerActor.icrc1_fee();
-                      feeBn = typeof f === 'bigint' ? f : BigInt(f);
-                    } catch {}
-                    const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                     await ledgerActor.icrc2_approve({
                       fee: [],
                       memo: [],
