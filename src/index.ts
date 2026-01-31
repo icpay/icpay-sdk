@@ -101,6 +101,49 @@ function u8FromBase64(b64: string): Uint8Array {
   return arr;
 }
 
+/**
+ * Normalize Solana signTransaction result to base64 signed transaction.
+ * Wallets may return: signedTransaction, transaction, signedMessage (string base64/base58),
+ * serializedTransaction (Uint8Array), or the raw value. Phantom may return base58.
+ */
+function normalizeSolanaSignedTransaction(r: any): string | null {
+  if (r == null) return null;
+  const toB64 = (val: any): string | null => {
+    if (val == null) return null;
+    if (typeof val === 'string') {
+      const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(val) && val.length >= 80 && val.length % 4 === 0;
+      if (looksBase64) return val;
+      try {
+        const decoded = base58Decode(val);
+        if (decoded.length > 64) return b64FromBytes(decoded);
+      } catch {}
+      return null;
+    }
+    if (val.byteLength != null || ArrayBuffer.isView(val)) {
+      const b = val instanceof Uint8Array ? val : new Uint8Array(val as ArrayBufferLike);
+      if (b.length > 64) return b64FromBytes(b);
+    }
+    if (typeof val === 'object' && typeof val.serialize === 'function') {
+      try {
+        const out = val.serialize({ requireAllSignatures: false, verifySignatures: false });
+        const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
+        if (b.length > 64) return b64FromBytes(b);
+      } catch {}
+    }
+    return null;
+  };
+  const direct = toB64(r);
+  if (direct) return direct;
+  if (typeof r === 'object') {
+    for (const key of ['signedTransaction', 'transaction', 'signedMessage', 'serializedTransaction', 'encodedTransaction', 'message']) {
+      const v = (r as any)[key];
+      const b64 = toB64(v);
+      if (b64) return b64;
+    }
+  }
+  return null;
+}
+
 /** Normalize Solana signMessage result to base64 64-byte signature. Phantom returns { signature, rawSignature }; some wallets return { signature: Uint8Array } or string. */
 function normalizeSolanaMessageSignature(r: any): string | null {
   if (!r) return null;
@@ -976,46 +1019,40 @@ export class Icpay {
             if (!r) {
               try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: prebuiltBase64 } }); } catch {}
             }
-            let candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
-            if (typeof candidate === 'string') {
-              const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
-              if (looksBase64) signedTxB64 = candidate; else signerSigBase58 = candidate;
-            } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
-              const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
-              if (b.length > 64) signedTxB64 = b64FromBytes(b); else if (b.length === 64) signerSigBase58 = base58Encode(b);
-            } else if (r && typeof r === 'object') {
-              const obj = r as any;
-              if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
-              if (!signedTxB64 && typeof obj.signature === 'string') signerSigBase58 = obj.signature;
-              if (!signedTxB64 && obj && typeof obj.serialize === 'function') {
-                try {
-                  const out = obj.serialize({ requireAllSignatures: false, verifySignatures: false });
-                  if (out && (out.byteLength != null || ArrayBuffer.isView(out))) {
-                    const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
-                    if (b.length > 64) signedTxB64 = b64FromBytes(b);
-                  }
-                } catch {}
+            signedTxB64 = normalizeSolanaSignedTransaction(r) ?? signedTxB64;
+            if (!signedTxB64 && !signerSigBase58) {
+              const candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
+              if (typeof candidate === 'string') {
+                const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
+                if (looksBase64) signedTxB64 = candidate; else signerSigBase58 = candidate;
+              } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
+                const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
+                if (b.length > 64) signedTxB64 = b64FromBytes(b); else if (b.length === 64) signerSigBase58 = base58Encode(b);
+              } else if (r && typeof r === 'object') {
+                const obj = r as any;
+                if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
+                if (!signedTxB64 && typeof obj.signature === 'string') signerSigBase58 = obj.signature;
+                if (!signedTxB64 && obj && typeof obj.serialize === 'function') {
+                  try {
+                    const out = obj.serialize({ requireAllSignatures: false, verifySignatures: false });
+                    if (out && (out.byteLength != null || ArrayBuffer.isView(out))) {
+                      const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
+                      if (b.length > 64) signedTxB64 = b64FromBytes(b);
+                    }
+                  } catch {}
+                }
               }
             }
-            // Direct provider API fallback (Phantom: signTransaction(Transaction))
             if (!signedTxB64 && typeof (sol as any).signTransaction === 'function') {
               try {
                 const txBytes = u8FromBase64(prebuiltBase64);
                 const stx = await (sol as any).signTransaction(txBytes as any);
-                if (stx) {
-                  if (typeof stx === 'string') {
-                    const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(stx) && stx.length % 4 === 0;
-                    if (looksBase64) signedTxB64 = stx; else signerSigBase58 = stx;
-                  } else if (stx && typeof stx.serialize === 'function') {
-                    try {
-                      const out = stx.serialize({ requireAllSignatures: false, verifySignatures: false });
-                      const b = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBufferLike);
-                      if (b.length > 64) signedTxB64 = b64FromBytes(b);
-                    } catch {}
-                  } else if (stx && (stx.byteLength != null || ArrayBuffer.isView(stx))) {
-                    const b = stx instanceof Uint8Array ? stx : new Uint8Array(stx as ArrayBufferLike);
-                    if (b.length > 64) signedTxB64 = b64FromBytes(b); else if (b.length === 64) signerSigBase58 = base58Encode(b);
-                  }
+                const parsed = normalizeSolanaSignedTransaction(stx);
+                if (parsed) signedTxB64 = parsed;
+                else if (stx && typeof stx === 'string' && stx.length === 88) signerSigBase58 = stx;
+                else if (stx && (stx.byteLength != null || ArrayBuffer.isView(stx))) {
+                  const b = stx instanceof Uint8Array ? stx : new Uint8Array(stx as ArrayBufferLike);
+                  if (b.length === 64) signerSigBase58 = base58Encode(b);
                 }
               } catch {}
             }
@@ -2546,17 +2583,27 @@ export class Icpay {
                         if (!r) try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: __txB64 } }); } catch {}
                       } catch {}
                     }
-                    const candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
-                    if (typeof candidate === 'string') {
-                      const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
-                      if (looksBase64) signedTxB64 = candidate;
-                    } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
-                      const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
-                      if (b.length > 64) signedTxB64 = b64FromBytes(b);
-                    } else if (r && typeof r === 'object') {
-                      const obj = r as any;
-                      if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
-                      else if (typeof obj.transaction === 'string') signedTxB64 = obj.transaction;
+                    signedTxB64 = normalizeSolanaSignedTransaction(r) ?? signedTxB64;
+                    if (!signedTxB64 && r) {
+                      const candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
+                      if (typeof candidate === 'string') {
+                        const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
+                        if (looksBase64) signedTxB64 = candidate;
+                      } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
+                        const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
+                        if (b.length > 64) signedTxB64 = b64FromBytes(b);
+                      } else if (typeof r === 'object') {
+                        const obj = r as any;
+                        if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
+                        else if (typeof obj.transaction === 'string') signedTxB64 = obj.transaction;
+                      }
+                    }
+                    if (!signedTxB64 && typeof (sol as any).signTransaction === 'function') {
+                      try {
+                        const txBytes = u8FromBase64(__txB64);
+                        const stx = await (sol as any).signTransaction(txBytes as any);
+                        signedTxB64 = normalizeSolanaSignedTransaction(stx) ?? signedTxB64;
+                      } catch {}
                     }
                     if (signedTxB64) {
                       const relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
