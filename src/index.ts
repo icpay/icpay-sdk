@@ -101,6 +101,46 @@ function u8FromBase64(b64: string): Uint8Array {
   return arr;
 }
 
+/** Normalize Solana signMessage result to base64 64-byte signature. Phantom returns { signature, rawSignature }; some wallets return { signature: Uint8Array } or string. */
+function normalizeSolanaMessageSignature(r: any): string | null {
+  if (!r) return null;
+  // Direct string (base58 or base64)
+  if (typeof r === 'string') {
+    if (r.length === 88 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(r)) {
+      try { const b = base58Decode(r); return b.length === 64 ? b64FromBytes(b) : null; } catch { return null; }
+    }
+    try { const b = u8FromBase64(r); return b.length === 64 ? b64FromBytes(b) : null; } catch { return null; }
+  }
+  // Byte-like (Uint8Array / ArrayBufferView)
+  if (r.byteLength != null || ArrayBuffer.isView(r)) {
+    const b = r instanceof Uint8Array ? r : new Uint8Array(r as ArrayBufferLike);
+    return b.length === 64 ? b64FromBytes(b) : null;
+  }
+  // Object: signature (string or Uint8Array) or rawSignature (base64 string)
+  if (typeof r === 'object') {
+    const sig = (r as any).signature;
+    if (sig != null) {
+      if (typeof sig === 'string') {
+        try { const b = base58Decode(sig); return b.length === 64 ? b64FromBytes(b) : null; } catch {}
+        try { const b = u8FromBase64(sig); return b.length === 64 ? b64FromBytes(b) : null; } catch {}
+      }
+      if (sig.byteLength != null || ArrayBuffer.isView(sig)) {
+        const b = sig instanceof Uint8Array ? sig : new Uint8Array(sig as ArrayBufferLike);
+        return b.length === 64 ? b64FromBytes(b) : null;
+      }
+    }
+    const raw = (r as any).rawSignature;
+    if (typeof raw === 'string') {
+      try { const b = u8FromBase64(raw); return b.length === 64 ? b64FromBytes(b) : null; } catch {}
+    }
+    if (Array.isArray((r as any).data)) {
+      const b = Uint8Array.from((r as any).data as number[]);
+      return b.length === 64 ? b64FromBytes(b) : null;
+    }
+  }
+  return null;
+}
+
 // Normalize metadata so internal icpay-managed fields are nested under metadata.icpay.
 // If icpay exists, merge; otherwise create. Move known internal keys and icpay_* keys under icpay.
 function normalizeSdkMetadata(base: any): any {
@@ -2497,22 +2537,12 @@ export class Icpay {
                     const msgBytes = u8FromBase64(signableMsgB64);
                     const msgB58ForReq = base58Encode(msgBytes);
                     // Attempts in order (strict):
-                    // 1) Wallet Standard: request colon form with Uint8Array
+                    // 1) Wallet Standard: request colon form with Uint8Array (Phantom returns { signature, rawSignature } or { signature: Uint8Array })
                     if (!sigB64 && (sol as any)?.request) {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'solana:signMessage', shape: 'object{message:Uint8Array}', len: msgBytes.length }); } catch {}
                         const r0: any = await (sol as any).request({ method: 'solana:signMessage', params: { message: msgBytes } });
-                        if (typeof r0 === 'string') {
-                          try { const b = base58Decode(r0); sigB64 = b64FromBytes(b); } catch { sigB64 = r0; }
-                        } else if (r0 && typeof r0.signature === 'string') {
-                          try { const b = base58Decode(r0.signature); sigB64 = b64FromBytes(b); } catch { sigB64 = r0.signature; }
-                        } else if (r0 && (r0.byteLength != null || ArrayBuffer.isView(r0))) {
-                          const b = r0 instanceof Uint8Array ? r0 : new Uint8Array(r0 as ArrayBufferLike);
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        } else if (r0 && typeof r0 === 'object' && Array.isArray((r0 as any).data)) {
-                          const b = Uint8Array.from(((r0 as any).data as number[]));
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        }
+                        sigB64 = normalizeSolanaMessageSignature(r0) ?? sigB64;
                       } catch (e0) {
                         try { debugLog(this.config?.debug || false, 'sol solana:signMessage failed', { error: String(e0) }); } catch {}
                       }
@@ -2522,15 +2552,7 @@ export class Icpay {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(fn) Uint8Array'); } catch {}
                         const r2: any = await (sol as any).signMessage(msgBytes);
-                        if (r2 && (r2.byteLength != null || ArrayBuffer.isView(r2))) {
-                          const b = r2 instanceof Uint8Array ? r2 : new Uint8Array(r2 as ArrayBufferLike);
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        } else if (typeof r2 === 'string') {
-                          try { const b = base58Decode(r2); sigB64 = b64FromBytes(b); } catch { sigB64 = r2; }
-                        } else if (r2 && typeof r2 === 'object' && typeof (r2 as any).signature === 'string') {
-                          const s = (r2 as any).signature;
-                          try { const b = base58Decode(s); sigB64 = b64FromBytes(b); } catch { sigB64 = s; }
-                        }
+                        sigB64 = normalizeSolanaMessageSignature(r2) ?? sigB64;
                       } catch (e2) {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(fn) failed', { error: String(e2) }); } catch {}
                       }
@@ -2540,17 +2562,7 @@ export class Icpay {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'signMessage', shape: 'object{message:Uint8Array}', len: msgBytes.length }); } catch {}
                         const r3: any = await (sol as any).request({ method: 'signMessage', params: { message: msgBytes } });
-                        if (typeof r3 === 'string') {
-                          try { const b = base58Decode(r3); sigB64 = b64FromBytes(b); } catch { sigB64 = r3; }
-                        } else if (r3 && typeof r3.signature === 'string') {
-                          try { const b = base58Decode(r3.signature); sigB64 = b64FromBytes(b); } catch { sigB64 = r3.signature; }
-                        } else if (r3 && (r3.byteLength != null || ArrayBuffer.isView(r3))) {
-                          const b = r3 instanceof Uint8Array ? r3 : new Uint8Array(r3 as ArrayBufferLike);
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        } else if (r3 && typeof r3 === 'object' && Array.isArray((r3 as any).data)) {
-                          const b = Uint8Array.from(((r3 as any).data as number[]));
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        }
+                        sigB64 = normalizeSolanaMessageSignature(r3) ?? sigB64;
                       } catch (e3) {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request Uint8Array) failed', { error: String(e3) }); } catch {}
                       }
@@ -2560,17 +2572,7 @@ export class Icpay {
                       try {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request) params', { method: 'signMessage', shape: 'object{message:base58}', len: msgB58ForReq.length }); } catch {}
                         const r4: any = await (sol as any).request({ method: 'signMessage', params: { message: msgB58ForReq } });
-                        if (typeof r4 === 'string') {
-                          try { const b = base58Decode(r4); sigB64 = b64FromBytes(b); } catch { sigB64 = r4; }
-                        } else if (r4 && typeof r4.signature === 'string') {
-                          try { const b = base58Decode(r4.signature); sigB64 = b64FromBytes(b); } catch { sigB64 = r4.signature; }
-                        } else if (r4 && (r4.byteLength != null || ArrayBuffer.isView(r4))) {
-                          const b = r4 instanceof Uint8Array ? r4 : new Uint8Array(r4 as ArrayBufferLike);
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        } else if (r4 && typeof r4 === 'object' && Array.isArray((r4 as any).data)) {
-                          const b = Uint8Array.from(((r4 as any).data as number[]));
-                          if (b && b.length === 64) sigB64 = b64FromBytes(b);
-                        }
+                        sigB64 = normalizeSolanaMessageSignature(r4) ?? sigB64;
                       } catch (e4) {
                         try { debugLog(this.config?.debug || false, 'sol signMessage(request legacy) failed', { error: String(e4) }); } catch {}
                       }
@@ -2649,10 +2651,13 @@ export class Icpay {
                     this.emitMethodSuccess('createPaymentX402Usd', waitedSolHdr);
                     return waitedSolHdr;
                     } else {
-                      // Fallback: if API provided an unsigned transaction, try transaction-signing path
+                      // Fallback: if API provided an unsigned transaction, try transaction-signing path (signTransaction like normal Solana flow)
                       const fallbackTx: string | undefined = (requirement as any)?.extra?.transactionBase64;
                       if (!fallbackTx) {
-                        throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Wallet did not sign message' });
+                        throw new IcpayError({
+                          code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                          message: 'Wallet did not sign message. Connect your Solana wallet before starting the payment and try again.',
+                        });
                       }
                       // Inject for transaction-signing fallback below
                       // eslint-disable-next-line @typescript-eslint/no-unused-vars
