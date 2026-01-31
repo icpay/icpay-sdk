@@ -910,6 +910,7 @@ export class Icpay {
     const prebuiltBase64: string | undefined = (params.request as any)?.__transactionBase64;
     if (typeof prebuiltBase64 === 'string' && prebuiltBase64.length > 0) {
       let signature: string | null = null;
+      let relay: any;
       try {
         if ((sol as any)?.request) {
           // Treat as Phantom only if the selected provider itself reports isPhantom,
@@ -980,7 +981,6 @@ export class Icpay {
             }
             if (!signedTxB64 && !signerSigBase58) throw new Error('Wallet did not return a signed transaction');
             // Relay via API
-            let relay: any;
             if (signedTxB64) {
               relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                 signedTransactionBase64: signedTxB64,
@@ -1037,6 +1037,25 @@ export class Icpay {
         throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
       }
       try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+      // If relay already returned completed payload (paymentIntent + payment), skip notify and polling
+      const relayPayload = typeof (relay as any)?.paymentIntent !== 'undefined' || typeof (relay as any)?.payment !== 'undefined' ? (relay as any) : undefined;
+      const relayStatus = relayPayload && (typeof (relayPayload as any).status === 'string' ? (relayPayload as any).status : (relayPayload as any)?.paymentIntent?.status || (relayPayload as any)?.payment?.status || '');
+      const relayTerminal = typeof relayStatus === 'string' && ['completed', 'succeeded'].includes(String(relayStatus).toLowerCase());
+      if (relayPayload && relayTerminal) {
+        const norm = String(relayStatus).toLowerCase();
+        const out = {
+          transactionId: 0,
+          status: norm === 'succeeded' ? 'completed' : (norm as any),
+          amount: params.amount.toString(),
+          recipientCanister: params.ledgerCanisterId!,
+          timestamp: new Date(),
+          description: 'Fund transfer',
+          metadata: { ...(params.metadata || {}), icpay_solana_tx_sig: signature },
+          payment: relayPayload,
+        };
+        this.emit('icpay-sdk-transaction-completed', out);
+        return out;
+      }
       try {
         await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
       } catch {}
