@@ -1020,11 +1020,12 @@ export class Icpay {
               } catch {}
             }
             if (!signedTxB64 && !signerSigBase58) throw new Error('Wallet did not return a signed transaction');
-            // Relay via API
+            // Relay via API (facilitatorPaysFee: true for x402 so facilitator pays network fee)
             if (signedTxB64) {
               relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                 signedTransactionBase64: signedTxB64,
                 paymentIntentId: params.paymentIntentId,
+                facilitatorPaysFee: true,
               });
             } else {
               relay = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
@@ -2561,6 +2562,7 @@ export class Icpay {
                       const relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                         signedTransactionBase64: signedTxB64,
                         paymentIntentId,
+                        facilitatorPaysFee: true,
                       });
                       const sig = (relay && (relay as any).signature) || null;
                       try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
