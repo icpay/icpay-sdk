@@ -2310,10 +2310,10 @@ export class Icpay {
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
       };
-      // Include Solana payerPublicKey if available so server can build unsigned tx inline for Solana x402
+      // Include Solana payerPublicKey so server can build unsigned tx (standard x402 flow)
       try {
         const w: any = (globalThis as any)?.window || (globalThis as any);
-        const sol = (this.config as any)?.solanaProvider || w?.solana || w?.phantom?.solana;
+        const sol = (this.config as any)?.solanaProvider || (this.config as any)?.connectedWallet?.solana || (this.config as any)?.connectedWallet || w?.solana || w?.phantom?.solana;
         const pk = sol?.publicKey?.toBase58?.() || sol?.publicKey || null;
         if (pk && typeof pk === 'string') {
           (body as any).payerPublicKey = pk;
@@ -2513,10 +2513,12 @@ export class Icpay {
                   });
                 }
                 if (isSol) {
-                  // Solana x402: prefer message-sign flow if server provided a signable message
+                  // Solana x402: follow standard flow (https://solana.com/developers/guides/getstarted/intro-to-x402)
+                  // — client signs transaction with signTransaction, then relay. No signMessage.
+                  const solTxBase64: string | undefined = (requirement as any)?.extra?.transactionBase64;
+                  const solMsgB58: string | undefined = (requirement as any)?.extra?.messageBase58;
                   const signableMsgB64: string | undefined = (requirement as any)?.extra?.signableMessageBase64;
                   const signableFields: any = (requirement as any)?.extra?.signableFields || {};
-                  const wSolCtx: any = (globalThis as any)?.window || (globalThis as any);
                   const sol = providerForHeader;
                   if (!sol) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_PROVIDER_NOT_AVAILABLE, message: 'Solana provider not available (window.solana)' });
                   // Get public key (already connected from widget)
@@ -2526,7 +2528,77 @@ export class Icpay {
                     try { const con = await (sol as any).connect({ onlyIfTrusted: false }); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
                   }
                   if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
-                  // No ICPay popups; only wallet UI should be shown for signing
+                  // Standard x402: when server provided unsigned tx, sign it and relay (no signMessage)
+                  if (solTxBase64 && solTxBase64.length > 0) {
+                    if (typeof (sol as any)?.connect === 'function') {
+                      try { await (sol as any).connect({ onlyIfTrusted: false }); } catch {}
+                    }
+                    const __txB64 = String(solTxBase64);
+                    const inlineMsgB58 = solMsgB58 && solMsgB58.length > 0 ? String(solMsgB58) : base58Encode(u8FromBase64(__txB64));
+                    let signedTxB64: string | null = null;
+                    let r: any = null;
+                    if ((sol as any)?.request) {
+                      try {
+                        try { r = await (sol as any).request({ method: 'signTransaction', params: { message: inlineMsgB58 } }); } catch {}
+                        if (!r) try { r = await (sol as any).request({ method: 'signTransaction', params: inlineMsgB58 as any }); } catch {}
+                        if (!r) try { r = await (sol as any).request({ method: 'solana:signTransaction', params: { transaction: __txB64 } }); } catch {}
+                        if (!r) try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: __txB64 } }); } catch {}
+                      } catch {}
+                    }
+                    const candidate = (r?.signedTransaction || r?.transaction || r?.signedMessage || r) as any;
+                    if (typeof candidate === 'string') {
+                      const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length % 4 === 0;
+                      if (looksBase64) signedTxB64 = candidate;
+                    } else if (candidate && (candidate.byteLength != null || ArrayBuffer.isView(candidate))) {
+                      const b = candidate instanceof Uint8Array ? candidate : new Uint8Array(candidate as ArrayBufferLike);
+                      if (b.length > 64) signedTxB64 = b64FromBytes(b);
+                    } else if (r && typeof r === 'object') {
+                      const obj = r as any;
+                      if (typeof obj.signedTransaction === 'string') signedTxB64 = obj.signedTransaction;
+                      else if (typeof obj.transaction === 'string') signedTxB64 = obj.transaction;
+                    }
+                    if (signedTxB64) {
+                      const relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
+                        signedTransactionBase64: signedTxB64,
+                        paymentIntentId,
+                      });
+                      const sig = (relay && (relay as any).signature) || null;
+                      try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                      if (sig) {
+                        try { await this.performNotifyPaymentIntent({ paymentIntentId, transactionId: sig, maxAttempts: 1 }); } catch {}
+                      }
+                      const relayStatus = (relay as any)?.status || (relay as any)?.paymentIntent?.status || (relay as any)?.payment?.status || '';
+                      const terminal = typeof relayStatus === 'string' && ['completed', 'succeeded'].includes(String(relayStatus).toLowerCase());
+                      if (terminal) {
+                        const out = {
+                          transactionId: 0,
+                          status: String(relayStatus).toLowerCase() === 'succeeded' ? 'completed' : (relayStatus as string),
+                          amount: (requirement as any)?.maxAmountRequired?.toString?.() || '',
+                          recipientCanister: ledgerCanisterId,
+                          timestamp: new Date(),
+                          metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_solana_tx_sig: sig },
+                          payment: relay,
+                        } as any;
+                        this.emit('icpay-sdk-transaction-completed', out);
+                        this.emitMethodSuccess('createPaymentX402Usd', out);
+                        return out;
+                      }
+                      const waited = await this.awaitIntentTerminal({
+                        paymentIntentId,
+                        transactionId: sig,
+                        ledgerCanisterId: ledgerCanisterId,
+                        amount: (requirement as any)?.maxAmountRequired?.toString?.() || '',
+                        metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_solana_tx_sig: sig },
+                      });
+                      this.emitMethodSuccess('createPaymentX402Usd', waited);
+                      return waited;
+                    }
+                    throw new IcpayError({
+                      code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                      message: 'Transaction was not signed. Please approve the transaction in your wallet.',
+                    });
+                  }
+                  // Fallback: message-sign flow only when no transactionBase64 (e.g. 402 built without payerPublicKey)
                   if (signableMsgB64) {
                     // Sign the provided message and settle via header (services will submit)
                     // Ensure explicit connect prompt before signing
