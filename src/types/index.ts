@@ -44,6 +44,9 @@ export interface IcpayConfig {
 
   /** Temporary kill switch: when true, disables Transak onramp regardless of request */
   onrampDisabled?: boolean;
+
+  /** Optional: Fiat currency code for display/conversion (e.g. USD, EUR). Used by createPaymentUsd/createPaymentX402Usd when request omits it. */
+  fiat_currency?: string;
 }
 
 export interface ConnectedWallet {
