@@ -1057,12 +1057,11 @@ export class Icpay {
               } catch {}
             }
             if (!signedTxB64 && !signerSigBase58) throw new Error('Wallet did not return a signed transaction');
-            // Relay via API (facilitatorPaysFee: true for x402 so facilitator pays network fee)
+            // Relay via API. Standard flow prebuilt tx has payer as fee payer (no facilitatorPaysFee).
             if (signedTxB64) {
               relay = await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
                 signedTransactionBase64: signedTxB64,
                 paymentIntentId: params.paymentIntentId,
-                facilitatorPaysFee: true,
               });
             } else {
               relay = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
