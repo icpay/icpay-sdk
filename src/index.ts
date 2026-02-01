@@ -2304,7 +2304,7 @@ export class Icpay {
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         recipientAddresses: (request as any)?.recipientAddresses,
-        fiat_currency: (request as any)?.fiat_currency,
+        fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
@@ -2352,8 +2352,11 @@ export class Icpay {
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
-        fiat_currency: (request as any)?.fiat_currency,
+        fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
       };
+      if ((body as any).fiat_currency === undefined || (body as any).fiat_currency === '') {
+        delete (body as any).fiat_currency;
+      }
       // Include Solana payerPublicKey so server can build unsigned tx (standard x402 flow)
       try {
         const w: any = (globalThis as any)?.window || (globalThis as any);
