@@ -139,6 +139,8 @@ export interface CreateTransactionRequest {
     ic?: string;
     sol?: string;
   };
+  /** Fiat currency for display: id or code (e.g. USD). Defaults to USD if missing. */
+  fiat_currency?: string;
 }
 
 export interface TransactionResponse {
@@ -631,6 +633,8 @@ export interface CreatePaymentUsdRequest {
     ic?: string;
     sol?: string;
   };
+  /** Fiat currency for display: id or code (e.g. USD). Defaults to USD if missing. */
+  fiat_currency?: string;
 }
 
 // Payments types
