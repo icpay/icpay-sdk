@@ -2039,7 +2039,7 @@ export class Icpay {
   /**
    * Public: Get balances for an external wallet (IC principal or EVM address) using publishable key
    */
-  async getExternalWalletBalances(params: { network: 'evm' | 'ic'; address?: string; principal?: string; chainId?: string; amountUsd?: number; amount?: string; chainShortcodes?: string[]; tokenShortcodes?: string[] }): Promise<AllLedgerBalances> {
+  async getExternalWalletBalances(params: { network: 'evm' | 'ic'; address?: string; principal?: string; chainId?: string; amountUsd?: number; amount?: string; fiatCurrency?: string; chainShortcodes?: string[]; tokenShortcodes?: string[] }): Promise<AllLedgerBalances> {
     this.emitMethodStart('getExternalWalletBalances', { params });
     try {
       const search = new URLSearchParams();
@@ -2049,6 +2049,7 @@ export class Icpay {
       if (params.chainId) search.set('chainId', params.chainId);
       if (typeof params.amountUsd === 'number' && isFinite(params.amountUsd)) search.set('amountUsd', String(params.amountUsd));
       if (typeof params.amount === 'string' && params.amount) search.set('amount', params.amount);
+      if (typeof params.fiatCurrency === 'string' && params.fiatCurrency.trim()) search.set('fiatCurrency', params.fiatCurrency.trim());
       if (Array.isArray(params.chainShortcodes) && params.chainShortcodes.length > 0) search.set('chainShortcodes', params.chainShortcodes.join(','));
       if (Array.isArray(params.tokenShortcodes) && params.tokenShortcodes.length > 0) search.set('tokenShortcodes', params.tokenShortcodes.join(','));
       const response: any = await this.publicApiClient.get(`/sdk/public/wallet/external-balances?${search.toString()}`);
