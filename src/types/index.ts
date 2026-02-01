@@ -429,6 +429,10 @@ export interface SdkPaymentIntent {
   status: PaymentIntentStatus;
   metadata: Record<string, unknown>;
   intentCode: number;
+  /** Fiat currency code used for this intent (e.g. USD, KRW). */
+  fiatCurrencyCode?: string | null;
+  /** Fiat currency symbol for display (e.g. $, ₩). */
+  fiatCurrencySymbol?: string | null;
   createdAt: string;
   updatedAt: string;
 }
