@@ -1575,6 +1575,7 @@ export class Icpay {
             recipientAddress,
             recipientAddresses: (request as any)?.recipientAddresses || undefined,
             externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
+            fiat_currency: (request as any)?.fiat_currency,
           });
         } else {
           if (onramp) {
@@ -1585,6 +1586,7 @@ export class Icpay {
               metadata: normalizeSdkMetadata(request.metadata || {}),
               widgetParams: request.widgetParams || undefined,
               recipientAddresses: (request as any)?.recipientAddresses || undefined,
+              fiat_currency: (request as any)?.fiat_currency,
             });
           } else {
             intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
@@ -1604,6 +1606,7 @@ export class Icpay {
               recipientAddress,
               recipientAddresses: (request as any)?.recipientAddresses || undefined,
               externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
+              fiat_currency: (request as any)?.fiat_currency,
             });
           }
         }
@@ -2300,6 +2303,7 @@ export class Icpay {
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         recipientAddresses: (request as any)?.recipientAddresses,
+        fiat_currency: (request as any)?.fiat_currency,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
@@ -2347,6 +2351,7 @@ export class Icpay {
         chainId: tokenShortcode ? undefined : (request as any).chainId,
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
+        fiat_currency: (request as any)?.fiat_currency,
       };
       // Include Solana payerPublicKey so server can build unsigned tx (standard x402 flow)
       try {
