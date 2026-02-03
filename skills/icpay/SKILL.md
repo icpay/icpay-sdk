@@ -15,7 +15,7 @@ Instruction manual for working with the ICPay project: SDK, widget, payment link
 - **X402 v2** — HTTP 402 “Payment Required” flow for IC, EVM, and Solana; sign authorization, ICPay facilitator settles; card/onramp-friendly.
 - **Currency** — Payment links have `fiatCurrencyId`; user/account profile can set default fiat for payment (USD, EUR, etc.).
 - **QR and mobile** — WalletConnect QR for desktop; deep links for mobile browsers so users can pay with mobile phone wallet apps.
-- **Wallet adapters** —  EVM: MetaMask, Coinbase, Brave, Rabby, OKX, WalletConnect. Solana: Phantom, Backpack. IC: Plug, Internet Identity (II), Oisy, NFID.Configurable enable/disable per adapter.
+- **Wallet adapters** —  EVM: MetaMask, Coinbase, Brave, Rabby, OKX, WalletConnect. Solana: Phantom, Backpack. IC: Plug, Internet Identity (II), Oisy, NFID. Configurable enable/disable per adapter.
 - **Split payments** — Optional: multiple merchants share revenue via split rules (target account + percentage in basis points).
 - **Refunds** — Refund completed payments; execute-refunds worker; webhook `payment.refunded`; email notification for refund completed.
 - **Email notifications** — Payment completed and refund completed emails to account; configurable templates; process-notifications worker.
@@ -93,7 +93,7 @@ Set `config` on the element (object with `publishableKey`, `tokenShortcode`, `am
 
 **Hosted embed (no bundler):** Script from `https://widget.icpay.org/v{VERSION}/embed.min.js`; then `ICPay.create('pay-button', { publishableKey, amountUsd, defaultSymbol, ... }).mount('#el')`.
 
-**Filter tokens/chains:** In config set `tokenShortcodes` (e.g. `['ic_icp','base_usdcoin']`), `chainShortcodes` (e.g. `['ic','base']`), or `chainTypes` (e.g. `['ic','evm','sol']`) to restrict which tokens or chains are shown in the widget.
+**Filter tokens/chains:** In config set `tokenShortcodes` (e.g. `['ic_icp','base_usdc']`), `chainShortcodes` (e.g. `['ic','base']`), or `chainTypes` (e.g. `['ic','evm','sol']`) to restrict which tokens or chains are shown in the widget.
 
 **Relay payments:** Set `recipientAddresses: { evm?: string, ic?: string, sol?: string }` in config; funds are relayed to those addresses. Optional relay fee is set per account in dashboard (Settings → ICPay Fees → Relay Fee).
 
@@ -226,7 +226,7 @@ if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return res
 
 ## Sandbox (betterstripe.com)
 
-- **https://betterstripe.com** — Sandbox environment for developers. Same functionality as icpay.org (dashboard, payment links, widget, API, webhooks, relay, X402, splits, refunds, email notifications) but uses **testnets** and mainnets, so you can test without mainnet funds.
+- **https://betterstripe.com** — Sandbox environment for developers. Same functionality as icpay.org (dashboard, payment links, widget, API, webhooks, relay, X402, splits, refunds, email notifications) but uses **testnets** as well as mainnets, so you can test without mainnet funds if you need to.
 - **Networks:** Solana devnet, Base Sepolia, Ark network testnet, and other supported testnets. Mainnet chains (e.g. Solana mainnet, Base mainnet, IC mainnet);
 - **Use case:** Integrate the widget or SDK against the sandbox API and pay page; create test accounts and payment links; verify webhooks, relay, and refund flows with testnet tokens.
 - **Keys:** Sandbox uses test keys (e.g. `pk_test_*`); keep sandbox and production keys separate. API base and pay page are sandbox-specific (betterstripe.com); switch to icpay.org and production API when going live.
