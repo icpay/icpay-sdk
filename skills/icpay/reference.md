@@ -55,6 +55,10 @@ API surface, entities, background workers, relay payments, X402 v2, split paymen
 
 Defined in `src/protected.ts` (this repo); called via `icpay.protected.*` when SDK (@ic-pay/icpay-sdk) is initialized with `secretKey`.
 
+## SDK events (icpay-sdk)
+
+The SDK emits events for agents and apps to listen to: **`icpay-sdk-transaction-completed`** (success — use for order fulfillment), `icpay-sdk-transaction-created`, `icpay-sdk-transaction-updated`, `icpay-sdk-transaction-failed`, `icpay-sdk-transaction-mismatched`, `icpay-sdk-method-start`, `icpay-sdk-method-success`, `icpay-sdk-method-error`, `icpay-sdk-error`, and optionally `icpay-sdk-onramp-intent-created`. Subscribe with `icpay.on(type, (detail) => { ... })`. Full event payloads and usage are documented in [SKILL.md](SKILL.md#sdk-events-icpay-sdk).
+
 ## Relay payments
 
 - Widget/SDK config: `recipientAddresses: { evm?, ic?, sol? }`. When set, payment is relayed to that address per chain; wallet list is filtered to matching chains. Relay fee (optional) is configured per account in dashboard (Settings → ICPay Fees → Relay Fee).

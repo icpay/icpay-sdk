@@ -1,6 +1,6 @@
 ---
 name: icpay
-description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, or any ICPay-related code in the icpay monorepo.
+description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, SDK events (icpay-sdk-transaction-completed for success, transaction lifecycle, method start/success/error), or any ICPay-related code in the icpay monorepo.
 # Canonical source: this repo. npm: @ic-pay/icpay-sdk. Widget: @ic-pay/icpay-widget.
 source: https://github.com/icpay/icpay-sdk/tree/master/skills/icpay
 ---
@@ -67,7 +67,7 @@ const tx = await icpay.createPaymentUsd({
 
 **Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, etc.
 
-Prefer SDK methods over raw fetch. Handle errors via `IcpayError`; subscribe to SDK events for lifecycle (see Events below).
+Prefer SDK methods over raw fetch. Handle errors via `IcpayError`; subscribe to SDK events for lifecycle (see **SDK events** below).
 
 ## Widget (`@ic-pay/icpay-widget`)
 
@@ -100,6 +100,91 @@ Set `config` on the element (object with `publishableKey`, `tokenShortcode`, `am
 **QR and deep links:** Payment links support `showWalletConnectQr` (default true) and `showBaseWalletQr`; WalletConnect shows QR on desktop and deep links on mobile so users can open wallet apps.
 
 Handle success/error via **events**, not console. Theming: CSS variables on `:root` or component (e.g. `--icpay-primary`, `--icpay-surface`). See [widget-reference.md](widget-reference.md) for options, wallet adapters, and component-specific config.
+
+## SDK events (icpay-sdk)
+
+The SDK emits named events so **agents and apps** can react to payment lifecycle and method outcomes without polling. Subscribe with `icpay.on(type, (detail) => { ... })`; unsubscribe with `icpay.off(type, listener)`. Events can be disabled via config: `{ enableEvents: false }` (default is `true`). In browsers the SDK uses `EventTarget`/`CustomEvent`; in Node it uses an in-memory emitter.
+
+### Success event (crucial for apps)
+
+**`icpay-sdk-transaction-completed`** — Fired when a payment has **successfully completed**. This is the **primary event apps should listen to** to fulfill orders, unlock content, or show confirmation.
+
+- **When it fires:** After the payment is confirmed (on-chain and/or backend reconciliation). Emitted from `createPayment`, `createPaymentUsd`, `createPaymentX402Usd`, and from polling/notify flows when status becomes `completed`.
+- **Payload (detail):** A **TransactionResponse**-shaped object:
+  - `transactionId` (number) — Canister/backend transaction id.
+  - `status: 'completed'`.
+  - `amount` (string) — Amount in smallest unit.
+  - `recipientCanister` (string).
+  - `timestamp` (Date).
+  - `description?`, `metadata?` (e.g. your `orderId`).
+  - `payment?` — When present, includes `paymentId`, `paymentIntentId`, `status`, `canisterTxId`, `transactionId` (from `PublicNotifyResponse`).
+- **What to do:** Use `detail.paymentIntentId` or `detail.payment?.paymentIntentId` and `detail.payment?.paymentId` for idempotency. Fulfill the order, persist success, show a success UI. Do **not** rely only on the widget callback; listening to this event ensures you capture completion even if the user navigates or the widget is unmounted.
+
+Example (SDK instance):
+
+```ts
+const unbind = icpay.on('icpay-sdk-transaction-completed', (detail) => {
+  const paymentIntentId = detail.payment?.paymentIntentId ?? detail.paymentIntentId;
+  const paymentId = detail.payment?.paymentId;
+  // Fulfill order, update DB, show success (idempotent by paymentId/paymentIntentId)
+});
+// later: unbind();
+```
+
+Example (window — e.g. when using the widget, which forwards SDK events to `window`):
+
+```ts
+function handleSuccess(e: CustomEvent) {
+  const detail = e.detail ?? e;
+  const paymentIntentId = detail.payment?.paymentIntentId ?? detail.paymentIntentId;
+  const paymentId = detail.payment?.paymentId;
+  // Fulfill order, update DB, show success (idempotent by paymentId/paymentIntentId)
+}
+window.addEventListener('icpay-sdk-transaction-completed', handleSuccess as EventListener);
+// later: window.removeEventListener('icpay-sdk-transaction-completed', handleSuccess as EventListener);
+```
+
+### Transaction lifecycle events
+
+- **`icpay-sdk-transaction-created`** — Payment intent created; user still has to send funds. Detail: `{ paymentIntentId, amount, ledgerCanisterId, expectedSenderPrincipal?, accountCanisterId? }`. Not emitted for onramp-only flows.
+- **`icpay-sdk-transaction-updated`** — Status changed (e.g. pending → processing). Detail: same shape as **TransactionResponse** (or with extra `status`, `requestedAmount`, `paidAmount` when relevant). Use for progress UI.
+- **`icpay-sdk-transaction-failed`** — Payment failed (rejected, timeout, or backend marked failed). Detail: **TransactionResponse**-like; check `status: 'failed'` and optional `reason` for messaging.
+- **`icpay-sdk-transaction-mismatched`** — Paid amount does not match requested amount. Detail: includes `requestedAmount`, `paidAmount` plus **TransactionResponse** fields. Followed by **`icpay-sdk-transaction-updated`** with `status: 'mismatched'`. Use to prompt user to correct or refund/partial-fulfill per business rules.
+
+### Method lifecycle events (generic)
+
+Every SDK method that uses the internal emitter fires:
+
+- **`icpay-sdk-method-start`** — Method invoked. Detail: `{ name: string, args?: any }` (e.g. `name: 'createPayment'`, `args: { request: { amountUsd, ... } }`).
+- **`icpay-sdk-method-success`** — Method finished successfully. Detail: `{ name: string, result?: any }` (e.g. `name: 'createPayment'`, `result` is the return value or a summary).
+- **`icpay-sdk-method-error`** — Method threw. Detail: `{ name: string, error: any }`.
+
+Method names include: `notifyPayment`, `getAccountInfo`, `quoteAtxpRequest`, `payAtxpRequest`, `executeAtxpRequest`, `getVerifiedLedgers`, `getChains`, `getLedgerCanisterIdBySymbol`, `triggerTransactionSync`, `showWalletModal`, `connectWallet`, `getWalletProviders`, `isWalletProviderAvailable`, `getAccountAddress`, `getLedgerBalance`, `createPayment`, `createPaymentUsd`, `createPaymentX402Usd`, `pollTransactionStatus`, `notifyLedgerTransaction`, `getTransactionStatusPublic`, `sendFundsToLedger`, `getTransactionByFilter`, `getExternalWalletBalances`, `getSingleLedgerBalance`, `calculateTokenAmountFromUSD`, `getLedgerInfo`, `getAllLedgersWithPrices`, and protected API method names when using `icpay.protected.*`.
+
+For payment success, prefer **`icpay-sdk-transaction-completed`** over `icpay-sdk-method-success` for `createPayment`/`createPaymentUsd`/`createPaymentX402Usd`, because the transaction-completed event carries the final payment state and is emitted at the right semantic time.
+
+### Error event
+
+- **`icpay-sdk-error`** — Any SDK error (including from method-error). Detail: an **IcpayError**-like object (`code`, `message`, `details?`). Use for logging and user-facing error messages.
+
+### Optional / internal
+
+- **`icpay-sdk-onramp-intent-created`** — Emitted when an onramp-only flow creates an intent (e.g. Transak). Detail: `{ paymentIntentId, amountUsd?, onramp? }`. Useful for UI that shows “redirect to onramp” state.
+
+### Summary table
+
+| Event | When | Detail (main fields) |
+|-------|------|----------------------|
+| **icpay-sdk-transaction-completed** | Payment succeeded | **TransactionResponse** + `payment?` — **use for fulfillment** |
+| icpay-sdk-transaction-created | Intent created | paymentIntentId, amount, ledgerCanisterId, … |
+| icpay-sdk-transaction-updated | Status changed | TransactionResponse (+ status/requestedAmount/paidAmount when relevant) |
+| icpay-sdk-transaction-failed | Payment failed | TransactionResponse, optional reason |
+| icpay-sdk-transaction-mismatched | Amount mismatch | TransactionResponse + requestedAmount, paidAmount |
+| icpay-sdk-method-start | Method called | name, args |
+| icpay-sdk-method-success | Method resolved | name, result |
+| icpay-sdk-method-error | Method rejected | name, error |
+| icpay-sdk-error | Any SDK error | IcpayError-like |
+| icpay-sdk-onramp-intent-created | Onramp intent created | paymentIntentId, amountUsd?, onramp? |
 
 ## Payment links
 
