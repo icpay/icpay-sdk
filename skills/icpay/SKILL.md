@@ -166,6 +166,89 @@ Use this when you are an AI agent that must **create the user, verify email, log
    - **Publishable key:** Use with **icpay-widget** to build any frontend that accepts crypto payments (pay button, tip jar, paywall, etc.).
    - **Secret key:** Use with **icpay-sdk** on the server for **protected** operations (e.g. `icpay.protected.getPaymentById`, `listPayments`, `getDetailedAccountInfo`) and to verify payment state. Alternatively (or in addition), register a **webhook** URL in the ICPay dashboard; verify `X-ICPay-Signature` and handle `payment.completed` and `payment.refunded` for fulfillment.
 
+9. **Other API endpoints (all require `Authorization: Bearer <access_token>`)**
+   With the JWT from step 4, the agent can perform all account operations via the API without using icpay.org. Base URL: `https://api.icpay.org`. Send `Content-Type: application/json` where a body is used.
+
+   **Email code for sensitive actions:** For **payouts**, **split rules** (create/update/delete/replace), the API requires an email verification code. First call `POST /user/security/email-challenge/start` (optional body `{ reason?, metadata? }`); the user receives an email with a code. Then include that code in the request body as `emailSecurityCode` or `securityCode` when calling the endpoint below. Alternatively use the same code from the login OTP flow if still valid for the same user.
+
+   - **User profile**
+     - `GET /users/profile` — Get current user profile.
+     - `PATCH /users/profile` — Update profile. Body: `SelfUpdateUserDto` (optional: `firstName`, `lastName`, `phone`, `dateOfBirth`, `avatarUrl`, `nationality`, `address` { line1, line2, city, stateOrProvince, postalCode, country }, `fiatCurrencyId`). Email cannot be changed via this endpoint.
+
+   - **Switch account**
+     - `POST /auth/switch-account` — Body: `{ "accountId": "<uuid>" }`. Returns new token scoped to that account; use for subsequent requests if the user has multiple accounts.
+
+   - **List user's accounts**
+     - `GET /user-account-users/my-accounts` — List accounts the user belongs to.
+     - `GET /user-account-users/my-pending-invitations` — List pending invitations.
+     - `POST /user-account-users/invite` — Invite a user to an account. Body: `CreateInvitationDto` — `accountId` (string), `email` (string), optional `role` (e.g. `"owner"` | `"admin"` | `"viewer"`, default `"viewer"`), optional `permissions` (string[]). `invitedBy` is not accepted from the client; it is set server-side from the authenticated user (JWT).
+     - `POST /user-account-users/:id/accept` — Accept invitation.
+     - `POST /user-account-users/:id/decline` — Decline invitation.
+     - `GET /user-account-users/account/:accountId` — List users for an account (must be member).
+
+   - **Account (user-accounts)**
+     - `PATCH /user-accounts/:id` — Update account (JWT: owner or admin of the account). Body: `UpdateAccountDto` — all optional, only the following are intended for user/owner use (admin-only and system fields are not listed): `name`, `email`, `country`, `accountType`, `businessName`, `businessType`, `isActive`, `isLive`, `taxId`, `businessProfile` (object: `name`, `url`, `mcc`, `supportEmail`, `supportPhone`, `supportUrl`), `capabilities` (object: `cardPayments`, `transfers`, `taxReporting`), `requirements` (object: `currentlyDue`, `eventuallyDue`, `pastDue`, `disabledReason`), `primaryDomain`, `branding` (object: `logoUrl`, `faviconUrl`, `primaryColor`, `secondaryColor`), `address`, `billingAddress`, `taxInfo`, `relayFeeBps` (number, basis points), `settings`.
+     - `POST /user-accounts/:id/regenerate-secret-key` — Regenerate API keys; returns `{ secretKey, publicKey }` (show secret once).
+     - `POST /user-accounts/:id/phone-change/start` — Start phone change; body `{ phone }`.
+     - `POST /user-accounts/:id/phone-change/verify` — Body `{ challengeId, code }` to confirm phone change.
+
+   - **Payment links**
+     - `GET /user/payment-links?accountId=<uuid>` — List payment links for account.
+     - `GET /user/payment-links/:id` — Get one payment link.
+     - `POST /user/payment-links` — Create. Body: `CreatePaymentLinkDto` — `name`, `description`, `amountUsd`, optional `fiatCurrencyId`, `accountId` (or use query `?accountId=`), collect/require (email, name, address, phone, business, shipping), quantity (allow, default, min, max), `maxRedemptions`, `widgetOptions`, `showWalletConnectQr`, `showBaseWalletQr`, `isActive`. Shortcode is generated.
+     - `PUT /user/payment-links/:id` — Update. Body: `UpdatePaymentLinkDto` (same fields as create, partial).
+     - `DELETE /user/payment-links/:id` — Delete payment link.
+     - `GET /user/payment-links/:id/submissions` — List submissions for the link.
+
+   - **Payments (list, get, refund)**
+     - `GET /user/payments?accountId=<uuid>` — List payments (with pagination).
+     - `GET /user/payments/summary` — Payment summary for account.
+     - `GET /user/payments/stats` — Payment stats.
+     - `GET /user/payments/:id` — Get payment by ID.
+     - `GET /user/payments/:id/refund-precheck` — Check if refund is allowed.
+     - `POST /user/payments/:id/refund` — Create a refund for the payment. No body required (refund is full). Refunds are processed by the execute-refunds worker; webhook `payment.refunded` is sent when done.
+
+   - **Payouts (require email code)**
+     - `GET /user/payouts?accountId=<uuid>` — List payouts.
+     - `POST /user/payouts` — Create payout. Body: `accountId`, `amount` (decimal string), optional `ledgerId`, `ledgerCanisterId`, `accountCanisterId`, `toWalletAddress`, `toWalletSubaccount`, and **`emailSecurityCode` or `securityCode`** (code from email). Only OWNER or admin with payouts permission.
+     - `POST /user/payouts/:id/execute` — Execute a created payout.
+
+   - **Webhook endpoints**
+     - `GET /user/webhook-endpoints?accountId=<uuid>` — List webhook endpoints.
+     - `GET /user/webhook-endpoints/:id` — Get one endpoint.
+     - `POST /user/webhook-endpoints` — Create. Body: `CreateWebhookEndpointDto` — `endpointUrl`, `eventTypes` (array, e.g. `["payment.completed","payment.refunded"]`), optional `accountId`, `isActive`, `secretKey`, `description`, `retryCount`, `timeoutSeconds`, `headers`.
+     - `PUT /user/webhook-endpoints/:id` — Update. Body: `UpdateWebhookEndpointDto` (partial: `endpointUrl`, `eventTypes`, `isActive`, `description`, `retryCount`, `timeoutSeconds`, `headers`).
+     - `DELETE /user/webhook-endpoints/:id` — Delete webhook endpoint.
+     - `POST /user/webhook-endpoints/:id/test` — Send a test event to the endpoint.
+
+   - **Webhook events**
+     - `GET /user/webhook-events` — List webhook events (query filters).
+     - `GET /user/webhook-events/:id` — Get one event.
+
+   - **Split rules (require email code for create/update/delete)**
+     - `GET /user/accounts/:accountId/split-rules` — List split rules for account.
+     - `POST /user/accounts/:accountId/split-rules` — Create split rule. Body: `CreateSplitRuleDto` — `targetAccountCanisterId` (number), `percentageBps` (0–10000), optional `targetAccountId`; and **`emailSecurityCode` or `securityCode`**. OWNER only.
+     - `PUT /user/accounts/:accountId/split-rules/:id` — Update split rule. Body: `UpdateSplitRuleDto` (partial) + **`emailSecurityCode` or `securityCode`**. OWNER only.
+     - `PUT /user/accounts/:accountId/split-rules` — Replace all rules atomically. Body: `{ rules: CreateSplitRuleDto[], emailSecurityCode?: string, securityCode?: string }`. OWNER only.
+     - `DELETE /user/accounts/:accountId/split-rules/:id` — Delete split rule. Body: **`emailSecurityCode` or `securityCode`**. OWNER only.
+     - `GET /user/accounts/:accountId/transactions/:transactionId/splits` — Get splits for a transaction.
+
+   - **Transactions**
+     - `GET /user-transactions?accountId=<uuid>` — List transactions.
+     - `GET /user-transactions/:id` — Get transaction by ID.
+
+   - **Notifications**
+     - `GET /user/notification-templates` — List notification templates.
+     - `GET /user/accounts/:accountId/subscriptions` — List subscription for account.
+     - `POST /user/accounts/:accountId/subscriptions` — Subscribe; body `{ templateId }`.
+     - `DELETE /user/accounts/:accountId/subscriptions/:templateId` — Unsubscribe.
+
+   - **Security (email challenge — get a code for sensitive actions)**
+     - `POST /user/security/email-challenge/start` — Request an email with a verification code. Optional body: `{ reason?, metadata? }`. Response includes `challengeId` (optional).
+     - `POST /user/security/email-challenge/verify` — Verify the code. Body: `{ code: "<6-digit>" }`. Use the same code in payout/split/wallet requests as `emailSecurityCode` or `securityCode`.
+
+   With these endpoints, the agent can create and manage payment links, webhooks, splits, payouts, refunds, wallets, and user profile entirely via the API, without using the icpay.org dashboard.
+
 ## Flow: I am the human (getting started myself)
 
 Use this when you are the developer/user and want to register on icpay.org, create one account, get API keys, and accept crypto payments.
