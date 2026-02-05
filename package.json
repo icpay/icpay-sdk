@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.93",
+  "version": "1.4.94",
   "description": "Official icpay SDK for Internet Computer payments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,7 +31,7 @@
     "@dfinity/principal": "^3.4.3"
   },
   "devDependencies": {
-    "@types/node": "^24.10.9",
+    "@types/node": "^24.10.10",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "eslint": "^9.39.2",
