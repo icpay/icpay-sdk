@@ -1,7 +1,7 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.94",
-  "description": "Official icpay SDK for Internet Computer payments",
+  "version": "1.4.95",
+  "description": "Official ICPay SDK for multi-chain crypto payments (EVM, Solana, Internet Computer)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,11 +16,14 @@
   },
   "keywords": [
     "icpay",
-    "internet-computer",
-    "icp",
-    "blockchain",
     "payments",
-    "sdk"
+    "sdk",
+    "evm",
+    "base",
+    "solana",
+    "internet-computer",
+    "blockchain",
+    "crypto"
   ],
   "author": "icpay",
   "license": "MIT",
