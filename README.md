@@ -1,6 +1,6 @@
 # ICPay SDK
 
-Official SDK for integrating Internet Computer payments with ICPay.
+Official SDK for integrating **ICPay** — multi-chain crypto payments on **EVM (e.g. Base)**, **Solana**, and **Internet Computer**. Use one API for payment intents, USD or token amounts, wallet connection, balances, and advanced flows (X402, ATXP) across all supported chains.
 
 ## Installation
 
@@ -26,14 +26,15 @@ import Icpay from '@ic-pay/icpay-sdk';
 
 const sdk = new Icpay({
   publishableKey: process.env.NEXT_PUBLIC_ICPAY_PK!,
-  // Optional for EVM flows in browser:
+  // Optional: pass wallet providers for browser flows
   evmProvider: (globalThis as any)?.ethereum,
+  solanaProvider: (globalThis as any)?.solana,
   debug: false,
 });
 
-// Create a USD payment (amount in USD, token resolved by shortcode)
+// Create a USD payment (amount in USD; token/chain by shortcode, e.g. base_usdc, sol_usdc, ic_icp)
 const tx = await sdk.createPaymentUsd({
-  tokenShortcode: 'icp',
+  tokenShortcode: 'base_usdc',
   usdAmount: 5,
   metadata: { orderId: 'ORDER-123' },
 });
@@ -41,28 +42,34 @@ const tx = await sdk.createPaymentUsd({
 console.log('Payment status:', tx.status);
 ```
 
+## Supported chains
+
+- **EVM** — Base (and other EVM chains): native and ERC‑20; automatic chain switching/addition hints.
+- **Solana** — SOL and SPL tokens; Phantom, Backpack, and other Solana wallets.
+- **Internet Computer** — ICP and ICRC tokens; Plug, Internet Identity, NFID, etc.
+
+Use `tokenShortcode` (e.g. `base_usdc`, `sol_usdc`, `ic_icp`) or `ledgerCanisterId` to target a specific chain/token. Full list: `getVerifiedLedgers()` or [docs.icpay.org](https://docs.icpay.org).
+
 ## Features
 
-- Public/secret key support (browser and Node.js)
-- Create payment intents in USD or token amounts
-- Multi-chain payment processing:
-  - EVM (native and ERC‑20), with automatic chain switching/addition hints
-  - Internet Computer
-- Wallet helpers: show connection modal, connect to providers, get providers, account address
-- Balances and prices: external wallet balances, single-ledger balance, verified ledgers, all ledgers with prices
-- Chain/ledger metadata: chains, ledger info (decimals, prices, logos)
-- Evented API: start/success/error + transaction lifecycle events
-- Advanced flows:
-  - X402: HTTP 402 workflow with verify, settle + fallbacks
-  - ATXP: quote/pay/execute
+- **Keys** — Publishable key (browser-safe) and secret key (server-only) support.
+- **Payments** — Create payment intents in USD or token amounts; relay to your EVM/IC/Solana addresses.
+- **Multi-chain** — Single SDK for EVM (Base, etc.), Solana, and Internet Computer.
+- **Wallet helpers** — Show connection modal, connect by provider, get providers, account address; WalletConnect QR and deep links.
+- **Balances & prices** — External wallet balances, single-ledger balance, verified ledgers, all ledgers with prices.
+- **Chain/ledger metadata** — `getChains()`, ledger info (decimals, prices, logos), token/chain filtering.
+- **Events** — Lifecycle events: start/success/error and transaction events (e.g. `icpay-sdk-transaction-completed`).
+- **Advanced flows** — **X402**: HTTP 402 sign-and-settle for IC, EVM, and Solana; **ATXP**: quote/pay/execute.
+- **Onramp** — Optional fiat-to-crypto via Transak (configurable per account).
 
 ## Documentation
 
-For full usage guides, configuration, API reference, and examples, see: https://docs.icpay.org
+Full usage, configuration, API reference, and examples: **[https://docs.icpay.org](https://docs.icpay.org)**
+Sandbox (testnets): **[betterstripe.com](https://betterstripe.com)** — Base Sepolia, Solana Devnet, and other test networks.
 
 ## AI agents
 
-Using Cursor, Claude Code, Antigravity, Windsurf, Continue, GitHub Copilot, Kiro, or Trae while working with ICPay? Add the **ICPay skill** so the agent follows SDK, widget, payment links, and integration conventions.
+Using Cursor, Claude Code, Antigravity, Windsurf, Continue, GitHub Copilot, Kiro, or Trae with ICPay? Add the **ICPay skill** so the agent follows SDK, widget, payment links, and integration conventions.
 
 ### If the SDK is already in node_modules
 
@@ -77,7 +84,6 @@ Use the same pattern for other IDEs (`.claude/skills/`, `.agent/skills/`, etc.).
 ### Or clone the repo
 
 Run the **copy** commands below from the **icpay-sdk repo root** (after `git clone https://github.com/icpay/icpay-sdk && cd icpay-sdk`). If you can use symlinks, prefer symlinking so the skill stays updated on `git pull`; see "Where Cursor looks for skills" below.
-
 
 | IDE / Agent | Where the skill goes | Copy command |
 |-------------|----------------------|--------------|
@@ -98,4 +104,4 @@ Cursor, Claude Code, and Antigravity use the full skill folder; the others use `
 ## TypeScript
 
 - Fully typed with bundled `.d.ts`
-- Named exports include `IcpayError`, `IcpayWallet`, events and types
+- Named exports include `IcpayError`, `IcpayWallet`, events, and types
