@@ -1494,7 +1494,8 @@ export class Icpay {
       return { paymentIntent: fromConfig, onramp: null };
     }
     const intentId = (fromRequest && typeof (fromRequest as any).id === 'string' && (fromRequest as any).id) ||
-      (fromConfig && typeof (fromConfig as any).id === 'string' && (fromConfig as any).id) || null;
+      (fromConfig && typeof (fromConfig as any).id === 'string' && (fromConfig as any).id) ||
+      (typeof (this.config as any)?.paymentIntentId === 'string' && (this.config as any).paymentIntentId) || null;
     if (intentId && this.publicApiClient) {
       try {
         debugLog(this.config.debug || false, 'fetching payment intent by id', { intentId });
@@ -1521,7 +1522,7 @@ export class Icpay {
       let ledgerCanisterId = request.ledgerCanisterId;
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
       const isOnrampFlow = ((request as any)?.onrampPayment === true) || ((this as any)?.config?.onrampPayment === true);
-      const hasPaymentIntent = (request as any)?.paymentIntent != null || (this.config as any)?.paymentIntent != null;
+      const hasPaymentIntent = (request as any)?.paymentIntent != null || (this.config as any)?.paymentIntent != null || (typeof (this.config as any)?.paymentIntentId === 'string' && (this.config as any).paymentIntentId);
       if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow && !hasPaymentIntent) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
