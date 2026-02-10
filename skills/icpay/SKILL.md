@@ -63,7 +63,7 @@ const tx = await icpay.createPaymentUsd({
 });
 ```
 
-**X402 v2 (IC, EVM, Solana):** Use `createPaymentX402Usd(request)` for sign-and-settle flows; SDK builds EIP-712 (EVM) or Solana message/transaction, sends to ICPay facilitator, returns terminal status. Fallback to regular `createPaymentUsd` when X402 not available.
+**X402 v2 (IC, EVM, Solana):** Use `createPaymentX402Usd(request)` for sign-and-settle flows; SDK builds EIP-712 (EVM) or Solana message/transaction, sends to ICPay facilitator, returns terminal status. Fallback to regular `createPaymentUsd` when X402 not available. When you have an existing payment intent (e.g. from a pay link), pass **`paymentIntentId`** or **`paymentIntent`** in config or in the request so the SDK sends it to the x402 intent endpoint and the API reuses that intent instead of creating a second one.
 
 **Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, etc.
 
@@ -190,11 +190,20 @@ For payment success, prefer **`icpay-sdk-transaction-completed`** over `icpay-sd
 
 Payment links are per-account entities with a unique **shortcode**. Public pay page: `https://icpay.org/pay/<shortcode>`.
 
-- **Create:** API `PaymentLinksService.createForAccount(accountId, dto)`; DTO includes `name`, `description`, `amountUsd`, `collectEmail`, `requireEmail`, `widgetOptions`, `showWalletConnectQr`, etc. Shortcode is generated (unique).
+- **Create (user/dashboard):** API `PaymentLinksService.createForAccount(accountId, dto)`; DTO includes `name`, `description`, `amountUsd`, `collectEmail`, `requireEmail`, `widgetOptions`, `showWalletConnectQr`, etc. Shortcode is generated (unique). User endpoints: `POST /user/payment-links` with JWT (see Flow: I am an agent).
+- **Create (POS / publishable key):** `POST /sdk/public/payment-links` with **publishable key** in `Authorization: Bearer <pk_...>`. Body: **CreatePosPaymentLinkDto** — `amountUsd` (required, min 0.01), optional `name`, `description`, `tokenShortcodes` (array; when exactly one, the payment intent is created with that token; otherwise intent has no token and user selects on pay page), `showWalletConnectQr` (default false for POS), `showBaseWalletQr` (default true). Creates the link and an associated **payment intent**; response includes `shortcode` and `paymentIntentId`. Use the pay page URL `https://icpay.org/pay/<shortcode>` (optionally `?paymentIntentId=<id>` for pre-filled intent). POS-only: recipient addresses are not set on the link.
 - **Public fetch:** `GET /public/payment-links/:shortcode` returns `{ link, account }` (link config + account publishableKey/branding). Used by `icpay-web` pay page.
 - **Merchant UI:** `icpay-web` → Payment Links → create/edit; link to `/pay/<shortcode>` shown after create.
 
 Payment link entity: `icpay-api/src/entities/payment-link.entity.ts`. Fields: `amountUsd`, `shortcode`, `fiatCurrencyId` (display currency for the link), collect/require for email, name, address, phone, quantity (min/max/default), `widgetOptions` (JSON), `showWalletConnectQr`, `showBaseWalletQr`, `isActive`.
+
+### Payment intent: reusing by id (widget, SDK, X402)
+
+When you already have a **payment intent id** (e.g. from a pay link or POS flow) but not the full intent object, pass **`paymentIntentId`** so the SDK and API reuse that intent instead of creating a new one.
+
+- **Widget:** In pay-button config (or when creating the SDK via the widget), set `paymentIntentId` when the full `paymentIntent` object is not loaded. The widget passes it into the SDK config; the SDK uses it in `getOrResolvePaymentIntent` and when calling the x402 intent endpoint.
+- **SDK config:** You can pass `paymentIntent` (full object) or **`paymentIntentId`** (string). When only the id is set, the SDK fetches the intent by id via `GET /sdk/public/payments/intents/:id` and uses it for `createPayment`, `createPaymentUsd`, and **createPaymentX402Usd**. This avoids creating a second intent when the user pays on a pay link (first intent created with the link, second avoided by passing the id).
+- **X402 intent endpoint:** When calling `POST /sdk/public/payments/intents/x402`, the SDK includes **`paymentIntentId`** in the request body when it has an existing intent (from config or request). The API **reuses** that intent when `body.paymentIntentId` is present: it loads the intent, verifies it belongs to the account and is in a reusable state (`requires_payment` or `processing`), merges `icpay_x402: true` into metadata, and returns that intent for the x402 response instead of creating a new one. Use this so a single payment intent is used end-to-end (e.g. pay link + x402 EVM flow) and metadata (e.g. `icpayPaymentLink`) is preserved.
 
 ## Accounts
 
