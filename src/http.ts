@@ -1,6 +1,14 @@
 export type RequestHeaders = Record<string, string>;
 
-export class HttpClient {
+/** Public API contract for the HTTP client (get, post, patch). */
+export interface IHttpClient {
+  get<T = any>(path: string, headers?: RequestHeaders): Promise<T>;
+  post<T = any>(path: string, body?: any, headers?: RequestHeaders): Promise<T>;
+  patch<T = any>(path: string, body?: any, headers?: RequestHeaders): Promise<T>;
+  setHeader(name: string, value: string | undefined): void;
+}
+
+export class HttpClient implements IHttpClient {
   private baseURL: string;
   private defaultHeaders: RequestHeaders;
 
@@ -30,6 +38,16 @@ export class HttpClient {
     const url = this.resolve(path);
     const res = await fetch(url, {
       method: 'POST',
+      headers: { ...this.defaultHeaders, ...(headers || {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    } as RequestInit);
+    return this.handleResponse<T>(res);
+  }
+
+  async patch<T = any>(path: string, body?: any, headers?: RequestHeaders): Promise<T> {
+    const url = this.resolve(path);
+    const res = await fetch(url, {
+      method: 'PATCH',
       headers: { ...this.defaultHeaders, ...(headers || {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     } as RequestInit);

@@ -293,6 +293,8 @@ export class Icpay {
     canisterTxId?: number;
     transactionId?: string;
     orderId?: string;
+    /** When paying with an existing intent on a payment link page, pass link context so the intent is linked. */
+    icpayPaymentLink?: Record<string, unknown>;
   }): Promise<{
     paymentId: string | null;
     paymentIntentId: string | null;
@@ -308,12 +310,14 @@ export class Icpay {
   }> {
     this.emitMethodStart('notifyPayment', { paymentIntentId: params.paymentIntentId });
     try {
-      const resp = await this.publicApiClient.post('/sdk/public/payments/notify', {
+      const body: any = {
         paymentIntentId: params.paymentIntentId,
         canisterTxId: params.canisterTxId,
         transactionId: params.transactionId,
         orderId: params.orderId,
-      });
+      };
+      if (params.icpayPaymentLink && typeof params.icpayPaymentLink === 'object') body.icpayPaymentLink = params.icpayPaymentLink;
+      const resp = await this.publicApiClient.post('/sdk/public/payments/notify', body);
       this.emitMethodSuccess('notifyPayment', { status: resp?.status, paymentIntentId: resp?.paymentIntentId });
       return resp;
     } catch (error) {
@@ -834,6 +838,7 @@ export class Icpay {
           paymentIntentId: paymentIntentId!,
           maxAttempts: 120,
           delayMs: 1000,
+          icpayPaymentLink: request?.metadata?.icpayPaymentLink,
         });
         // Derive status from API response
         let statusString: 'pending' | 'completed' | 'failed' = 'pending';
@@ -1134,7 +1139,7 @@ export class Icpay {
         return out;
       }
       try {
-        await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1 });
+        await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: signature, maxAttempts: 1, icpayPaymentLink: params.metadata?.icpayPaymentLink });
       } catch {}
       const finalQuick = await this.awaitIntentTerminal({
         paymentIntentId: params.paymentIntentId,
@@ -1329,7 +1334,7 @@ export class Icpay {
     try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
     // Inform API immediately with tx hash so it can start indexing
     try {
-      await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: txHash, maxAttempts: 1 });
+      await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: txHash, maxAttempts: 1, icpayPaymentLink: params.metadata?.icpayPaymentLink });
     } catch {}
     const finalResponse = await this.awaitIntentTerminal({
       paymentIntentId: params.paymentIntentId,
@@ -1471,6 +1476,40 @@ export class Icpay {
   }
 
   /**
+   * Resolve payment intent from config or request: use full intent if provided, else fetch by id via API.
+   * Returns null when no pre-provided intent (caller should create via POST).
+   */
+  private async getOrResolvePaymentIntent(request: CreateTransactionRequest): Promise<{ paymentIntent: any; onramp: any } | null> {
+    const isFullIntent = (o: any): boolean =>
+      o && typeof o === 'object' && o.id && typeof (o.amount === 'string' ? o.amount : String(o.amount ?? '')) === 'string' &&
+      (o.chainType != null || o.chainId != null || (o.ledgerCanisterId != null && o.ledgerCanisterId !== ''));
+    const fromRequest = (request as any)?.paymentIntent;
+    const fromConfig = (this.config as any)?.paymentIntent;
+    if (fromRequest && isFullIntent(fromRequest)) {
+      debugLog(this.config.debug || false, 'using payment intent from request');
+      return { paymentIntent: fromRequest, onramp: null };
+    }
+    if (fromConfig && isFullIntent(fromConfig)) {
+      debugLog(this.config.debug || false, 'using payment intent from config');
+      return { paymentIntent: fromConfig, onramp: null };
+    }
+    const intentId = (fromRequest && typeof (fromRequest as any).id === 'string' && (fromRequest as any).id) ||
+      (fromConfig && typeof (fromConfig as any).id === 'string' && (fromConfig as any).id) || null;
+    if (intentId && this.publicApiClient) {
+      try {
+        debugLog(this.config.debug || false, 'fetching payment intent by id', { intentId });
+        const resp = await this.publicApiClient.get(`/sdk/public/payments/intents/${encodeURIComponent(intentId)}`);
+        if (resp?.paymentIntent) {
+          return { paymentIntent: resp.paymentIntent, onramp: resp.onramp ?? null };
+        }
+      } catch (e) {
+        debugLog(this.config.debug || false, 'fetch payment intent failed', e);
+      }
+    }
+    return null;
+  }
+
+  /**
    * Create a payment to a specific canister/ledger (public method)
    * This is now a real transaction
    */
@@ -1482,10 +1521,11 @@ export class Icpay {
       let ledgerCanisterId = request.ledgerCanisterId;
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
       const isOnrampFlow = ((request as any)?.onrampPayment === true) || ((this as any)?.config?.onrampPayment === true);
-      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow) {
+      const hasPaymentIntent = (request as any)?.paymentIntent != null || (this.config as any)?.paymentIntent != null;
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow && !hasPaymentIntent) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated).',
+          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated), or pass paymentIntent.',
           details: { request }
         });
         this.emitMethodError('createPayment', err);
@@ -1494,7 +1534,7 @@ export class Icpay {
 
       let memo: Uint8Array | undefined = undefined;
 
-      // 1) Create payment intent via API (backend will finalize amount/price)
+      // 1) Resolve or create payment intent: use pre-provided (config/request) or fetch by id, else create via API
       let paymentIntentId: string | null = null;
       let paymentIntentCode: number | null = null;
       let intentChainType: string | undefined;
@@ -1502,12 +1542,55 @@ export class Icpay {
       let accountCanisterId: string;
       let resolvedAmountStr: string | undefined = typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined);
       let intentResp: any;
+      let expectedSenderPrincipal: string | undefined;
       try {
-        debugLog(this.config.debug || false, 'creating payment intent');
+        const meta: any = request?.metadata || {};
+        const isAtxp = Boolean(meta?.icpay_atxp_request) && typeof (meta?.atxp_request_id) === 'string';
+        const onramp = (request.onrampPayment === true || this.config.onrampPayment === true) && this.config.onrampDisabled !== true ? true : false;
+        // If we have a pre-provided intent or an id to fetch, resolve first (skip create for non-ATXP/non-onramp create flows)
+        if (!isAtxp && !onramp) {
+          const resolved = await this.getOrResolvePaymentIntent(request);
+          if (resolved) {
+            let pi = resolved.paymentIntent;
+            const intentHasToken = (pi?.ledgerId != null) || (pi?.ledgerCanisterId && String(pi.ledgerCanisterId).trim() !== '');
+            if (!intentHasToken) {
+              const tokenToSet = (request as any)?.tokenShortcode;
+              if (tokenToSet && typeof tokenToSet === 'string' && this.publicApiClient) {
+                try {
+                  await this.publicApiClient.patch(`/sdk/public/payments/intents/${encodeURIComponent(pi.id)}/set-token`, { tokenShortcode: tokenToSet.trim() });
+                  const refetched = await this.publicApiClient.get(`/sdk/public/payments/intents/${encodeURIComponent(pi.id)}`);
+                  if (refetched?.paymentIntent) pi = refetched.paymentIntent;
+                } catch (e) {
+                  debugLog(this.config.debug || false, 'set-token failed', e);
+                  throw new IcpayError({
+                    code: ICPAY_ERROR_CODES.API_ERROR,
+                    message: 'Payment intent requires a token to be selected. Setting token failed.',
+                    details: e,
+                    retryable: true,
+                    userAction: 'Ensure tokenShortcode is valid and try again',
+                  });
+                }
+              } else {
+                throw new IcpayError({
+                  code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+                  message: 'Payment intent requires a token to be selected before payment. Provide tokenShortcode in the request.',
+                  details: { paymentIntentId: pi?.id },
+                  retryable: false,
+                  userAction: 'Select a token (e.g. pass tokenShortcode) and try again',
+                });
+              }
+            }
+            intentResp = { paymentIntent: pi, onramp: resolved.onramp };
+            expectedSenderPrincipal = (request as any).expectedSenderPrincipal ||
+              this.connectedWallet?.owner || this.connectedWallet?.principal?.toString();
+          }
+        }
+        if (!intentResp) {
+          debugLog(this.config.debug || false, 'creating payment intent via API');
 
         // Resolve expected sender principal:
         // Start with any value explicitly provided on the request or via connectedWallet.
-        let expectedSenderPrincipal: string | undefined =
+        expectedSenderPrincipal =
           (request as any).expectedSenderPrincipal ||
           this.connectedWallet?.owner ||
           this.connectedWallet?.principal?.toString();
@@ -1608,6 +1691,7 @@ export class Icpay {
               fiat_currency: (request as any)?.fiat_currency,
             });
           }
+        }
         }
         paymentIntentId = intentResp?.paymentIntent?.id || null;
         paymentIntentCode = intentResp?.paymentIntent?.intentCode ?? null;
@@ -2622,7 +2706,7 @@ export class Icpay {
                       const sig = (relay && (relay as any).signature) || null;
                       try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
                       if (sig) {
-                        try { await this.performNotifyPaymentIntent({ paymentIntentId, transactionId: sig, maxAttempts: 1 }); } catch {}
+                        try { await this.performNotifyPaymentIntent({ paymentIntentId, transactionId: sig, maxAttempts: 1, icpayPaymentLink: request.metadata?.icpayPaymentLink }); } catch {}
                       }
                       const relayStatus = (relay as any)?.status || (relay as any)?.paymentIntent?.status || (relay as any)?.payment?.status || '';
                       const terminal = typeof relayStatus === 'string' && ['completed', 'succeeded'].includes(String(relayStatus).toLowerCase());
@@ -3496,7 +3580,7 @@ export class Icpay {
   }
 
   /** Reusable notify helper for both ledger flow and onramp */
-  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string; ledgerCanisterId?: string; ledgerBlockIndex?: string | number; accountCanisterId?: number; externalCostAmount?: string | number; recipientPrincipal?: string }): Promise<any> {
+  private async performNotifyPaymentIntent(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; maxAttempts?: number; delayMs?: number; orderId?: string; ledgerCanisterId?: string; ledgerBlockIndex?: string | number; accountCanisterId?: number; externalCostAmount?: string | number; recipientPrincipal?: string; icpayPaymentLink?: Record<string, unknown> }): Promise<any> {
     const notifyClient = this.publicApiClient;
     const notifyPath = '/sdk/public/payments/notify';
     const maxAttempts = params.maxAttempts ?? 1;
@@ -3513,6 +3597,7 @@ export class Icpay {
         if (typeof params.accountCanisterId === 'number') body.accountCanisterId = params.accountCanisterId;
         if (params.externalCostAmount != null) body.externalCostAmount = params.externalCostAmount;
         if (typeof params.recipientPrincipal === 'string') body.recipientPrincipal = params.recipientPrincipal;
+        if (params.icpayPaymentLink && typeof params.icpayPaymentLink === 'object') body.icpayPaymentLink = params.icpayPaymentLink;
         const resp: any = await notifyClient.post(notifyPath, body);
         // If this is the last attempt, return whatever we got
         if (attempt === maxAttempts) {
@@ -3564,6 +3649,7 @@ export class Icpay {
           accountCanisterId: params.accountCanisterId,
           externalCostAmount: params.externalCostAmount,
           recipientPrincipal: params.recipientPrincipal,
+          icpayPaymentLink: params.metadata?.icpayPaymentLink,
         });
         const status = (resp as any)?.paymentIntent?.status || (resp as any)?.payment?.status || (resp as any)?.status || '';
         const norm = typeof status === 'string' ? status.toLowerCase() : '';

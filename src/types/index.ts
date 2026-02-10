@@ -47,6 +47,58 @@ export interface IcpayConfig {
 
   /** Optional: Fiat currency code for display/conversion (e.g. USD, EUR). Used by createPaymentUsd/createPaymentX402Usd when request omits it. */
   fiat_currency?: string;
+
+  /**
+   * Optional: Pre-resolved payment intent (e.g. from icpay-widget). When set, createPayment will use this
+   * instead of creating a new intent via the API. Can be a full intent object or just { id: string } to fetch.
+   */
+  paymentIntent?: ResolvedPaymentIntentLike | PaymentIntentIdOnly;
+}
+
+/**
+ * Minimal shape when only intent id is provided (SDK will fetch full intent via GET).
+ */
+export interface PaymentIntentIdOnly {
+  id: string;
+}
+
+/**
+ * Payment intent shape as returned by API (create or GET). Includes all fields from
+ * PaymentIntentDto + enrichment (chain, account, fiat, ledger shortcode, etc.).
+ */
+export interface ResolvedPaymentIntentLike extends SdkPaymentIntent {
+  /** USD amount (from entity) */
+  amountUsd?: number | null;
+  /** When fiat is not USD, the amount in that fiat (e.g. 10 for 10 GBP). */
+  amountInFiat?: number | null;
+  /** Token price at intent creation (from entity). */
+  currentPrice?: number | null;
+  /** Recipient address (legacy single) */
+  recipientAddress?: string | null;
+  /** Per-chain recipient addresses */
+  recipientAddresses?: { evm?: string; ic?: string; sol?: string } | null;
+  /** Ledger/token shortcode for display and requests */
+  tokenShortcode?: string | null;
+  shortcode?: string | null;
+  /** Chain type: ic, evm, sol, etc. */
+  chainType?: string | null;
+  networkType?: string | null;
+  /** Backend chain UUID */
+  chainId?: string | null;
+  chainName?: string | null;
+  /** Account canister id (from account) for memo/notify */
+  accountCanisterId?: string | number | null;
+  /** Contract address (e.g. IC canister id or EVM/Solana program) */
+  contractAddress?: string | null;
+  rpcUrlPublic?: string | null;
+  /** Numeric chain id for EVM/Solana */
+  rpcChainId?: string | number | null;
+  functionSelectors?: Record<string, string> | null;
+  externalCostAmount?: string | null;
+  /** Pre-built unsigned transaction (e.g. Solana) */
+  transactionBase64?: string | null;
+  /** Allow any additional fields the API may return */
+  [key: string]: unknown;
 }
 
 export interface ConnectedWallet {
@@ -144,6 +196,11 @@ export interface CreateTransactionRequest {
   };
   /** Fiat currency for display: id or code (e.g. USD). Defaults to USD if missing. */
   fiat_currency?: string;
+  /**
+   * Optional: Pre-resolved payment intent (e.g. from icpay-widget). When set, SDK uses this
+   * instead of creating a new intent. Can be full ResolvedPaymentIntentLike or { id: string } to fetch.
+   */
+  paymentIntent?: ResolvedPaymentIntentLike | PaymentIntentIdOnly;
 }
 
 export interface TransactionResponse {
