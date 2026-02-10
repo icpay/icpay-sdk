@@ -10,13 +10,16 @@ API surface, entities, background workers, relay payments, X402 v2, split paymen
 ### Public SDK (publishable key)
 
 - `POST /sdk/payment-intents` — Create payment intent (amount, symbol/ledger, metadata).
+- `GET /sdk/public/payments/intents/:id` — Get payment intent by id (used by SDK when only `paymentIntentId` is provided).
 - `GET /sdk/payments/:id` — Payment aggregate by ID.
 - `POST /sdk/notify` — Notify ICPay about a transaction to expedite reconciliation.
+- **`POST /sdk/public/payment-links`** — Create payment link + payment intent (POS flow). Auth: publishable key. Body: **CreatePosPaymentLinkDto** — `amountUsd` (required), optional `name`, `description`, `tokenShortcodes` (array; one = intent created with that token), `showWalletConnectQr`, `showBaseWalletQr`. Returns `{ shortcode, paymentIntentId, ... }`. Use pay page URL `https://icpay.org/pay/<shortcode>` (optionally `?paymentIntentId=<id>`).
+- **`POST /sdk/public/payments/intents/x402`** — Create or reuse payment intent for X402. Body may include **`paymentIntentId`**; when present, API reuses that intent (same account, status requires_payment/processing), merges `icpay_x402` + clientIp into metadata, and returns it for the x402 response instead of creating a new intent. SDK sends `paymentIntentId` when config or request has an existing intent so pay link + x402 use a single intent.
 - X402 v2: facilitator endpoints for verify/settle (IC, EVM, Solana); SDK uses `createPaymentX402Usd` and settle with X402 header.
 
 ### Public payment links (no auth)
 
-- `GET /public/payment-links/:shortcode` — Returns `{ link, account }` for pay page. Link: DTO with amountUsd, shortcode, collect/require fields, widgetOptions. Account: id, name, email, businessName, publishableKey, branding.
+- `GET /public/payment-links/:shortcode` — Returns `{ link, account }` for pay page. Link: DTO with amountUsd, shortcode, collect/require fields, widgetOptions, showWalletConnectQr, showBaseWalletQr. Account: id, name, email, businessName, publishableKey, branding.
 
 ### User (JWT)
 
@@ -42,8 +45,10 @@ API surface, entities, background workers, relay payments, X402 v2, split paymen
 ## Payment link DTOs and service
 
 - **CreatePaymentLinkDto** — name, description, amountUsd, fiatCurrencyId (optional), collectEmail, requireEmail, collectName, requireName, collectBusinessName, requireBusinessName, collectAddress, requireAddress, collectShippingAddress, requireShippingAddress, collectPhone, requirePhone, allowQuantity, allowBuyerChangeQuantity, defaultQuantity, minQuantity, maxQuantity, maxRedemptions, widgetOptions, showWalletConnectQr, showBaseWalletQr, isActive.
+- **CreatePosPaymentLinkDto** (POS / public SDK) — amountUsd (required, min 0.01), optional name, description, tokenShortcodes (array; one = intent with that token), showWalletConnectQr (default false), showBaseWalletQr (default true). Used by `POST /sdk/public/payment-links` with publishable key.
 - **PaymentLinksService** — `createForAccount(accountId, dto)` (generates unique shortcode), `updateForAccount`, `getActiveByShortcode(shortcode)`.
 - **User payment links:** User-scoped controllers in `icpay-api/src/payments/` (user-payment-links.controller, etc.).
+- **Public SDK payment links:** `icpay-api/src/payments/public-sdk-payment-links.controller.ts` — `POST /sdk/public/payment-links` creates link + intent; returns shortcode and paymentIntentId.
 
 ## SDK protected API (secret key)
 
@@ -66,6 +71,7 @@ The SDK emits events for agents and apps to listen to: **`icpay-sdk-transaction-
 ## X402 v2
 
 - Supported for IC, EVM, and Solana. Flow: get acceptance(s) from API → client signs (EIP-712 for EVM, message/tx for Solana) → settle via facilitator. SDK: `createPaymentX402Usd`; fallback to regular createPaymentUsd when X402 not available. Docs: `icpay-docs/src/app/x402/page.mdx`.
+- **Payment intent reuse:** When the client already has a payment intent (e.g. pay link or POS), the SDK sends **paymentIntentId** in the body to `POST /sdk/public/payments/intents/x402`. The API reuses that intent when valid (same account, status requires_payment or processing), merges x402 metadata, and returns it instead of creating a new intent so one intent is used for the full flow.
 
 ## Split payments
 
