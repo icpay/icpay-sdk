@@ -2423,6 +2423,14 @@ export class Icpay {
       const ledgerCanisterId = request.ledgerCanisterId || '';
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
 
+      // Resolve existing payment intent id so API reuses it instead of creating a second intent (e.g. pay link page)
+      const existingIntentId =
+        (typeof (request as any)?.paymentIntentId === 'string' && (request as any).paymentIntentId) ||
+        (typeof (request as any)?.paymentIntent?.id === 'string' && (request as any).paymentIntent.id) ||
+        (typeof (this.config as any)?.paymentIntentId === 'string' && (this.config as any).paymentIntentId) ||
+        (typeof (this.config as any)?.paymentIntent?.id === 'string' && (this.config as any).paymentIntent.id) ||
+        null;
+
       // Hit X402 endpoint
       const body: any = {
         amount: (request as any).amount,
@@ -2438,6 +2446,9 @@ export class Icpay {
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
       };
+      if (existingIntentId) {
+        body.paymentIntentId = existingIntentId;
+      }
       if ((body as any).fiat_currency === undefined || (body as any).fiat_currency === '') {
         delete (body as any).fiat_currency;
       }
