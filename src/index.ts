@@ -1302,8 +1302,9 @@ export class Icpay {
           throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payNative selector from API; update API/chain metadata.' });
         }
         const data = extSel + idHex + toUint64(accountIdNum) + toUint256(externalCost) + toAddressPadded(recipient);
-        debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: data.length, value: amountHex, recipient });
-        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data, value: amountHex }] });
+        const dataWithAttribution = appendBaseBuilderSuffixIfNeeded(currentChainId, data);
+        debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: dataWithAttribution.length, value: amountHex, recipient });
+        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data: dataWithAttribution, value: amountHex }] });
       } else {
         // Ensure allowance(owner -> spender=contractAddress)
         const allowanceSelector = '0xdd62ed3e'; // allowance(address,address)
