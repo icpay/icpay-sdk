@@ -1,3 +1,4 @@
+import { appendBaseBuilderSuffixIfNeeded } from './base-builder-code';
 import { buildAndSignX402PaymentHeader, buildX402HeaderFromAuthorization } from './x402/builders';
 import {
   IcpayConfig,
@@ -1216,6 +1217,13 @@ export class Icpay {
       }
     } catch {}
 
+    // Resolve current chain id for Base Builder Code attribution (only EVM)
+    let currentChainId: number | null = null;
+    try {
+      const currentHex: string = await eth.request({ method: 'eth_chainId' });
+      currentChainId = parseInt(currentHex, 16);
+    } catch {}
+
     const tokenAddress: string | null = params.ledgerCanisterId || null;
     const isNative = !tokenAddress || /^0x0{40}$/i.test(String(tokenAddress));
     const amountHex = '0x' + params.amount.toString(16);
@@ -1308,8 +1316,9 @@ export class Icpay {
           debugLog(this.config.debug || false, 'evm erc20 allowance result', { allowance: allowance.toString() });
           if (allowance < params.amount) {
             const approveData = approveSelector + toAddressPadded(contractAddress) + toUint256(params.amount);
-            debugLog(this.config.debug || false, 'evm erc20 approve', { to: tokenAddress, from: owner, dataLen: approveData.length, amount: params.amount.toString() });
-            const approveTx = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: String(tokenAddress), data: approveData }] });
+            const approveDataWithAttribution = appendBaseBuilderSuffixIfNeeded(currentChainId, approveData);
+            debugLog(this.config.debug || false, 'evm erc20 approve', { to: tokenAddress, from: owner, dataLen: approveDataWithAttribution.length, amount: params.amount.toString() });
+            const approveTx = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: String(tokenAddress), data: approveDataWithAttribution }] });
             debugLog(this.config.debug || false, 'evm erc20 approve sent', { tx: approveTx });
             await waitForReceipt(approveTx, 90, 1000);
           }
@@ -1322,8 +1331,9 @@ export class Icpay {
         }
         const base = idHex + toUint64(accountIdNum) + toAddressPadded(String(tokenAddress)) + toUint256(params.amount) + toUint256(externalCost);
         const data = extSel + base + toAddressPadded(recipient);
-        debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: data.length, recipient });
-        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data }] });
+        const dataWithAttribution = appendBaseBuilderSuffixIfNeeded(currentChainId, data);
+        debugLog(this.config.debug || false, 'evm erc20 pay', { to: contractAddress, from: owner, token: tokenAddress, dataLen: dataWithAttribution.length, recipient });
+        txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data: dataWithAttribution }] });
       }
     } catch (e: any) {
       try { debugLog(this.config.debug || false, 'evm tx error', { message: e?.message, code: e?.code, data: e?.data, error: e }); } catch {}
