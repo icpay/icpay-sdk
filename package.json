@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.102",
+  "version": "1.4.103",
   "description": "Official ICPay SDK for multi-chain crypto payments (EVM, Solana, Internet Computer)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
