@@ -7,8 +7,8 @@
  */
 const ICPAY_BASE_BUILDER_CODE = 'bc_h549c0ug';
 
-/** ERC-8021 16-byte marker at end of calldata */
-const ERC_8021_MARKER = '802180218021802180218021802180218021';
+/** ERC-8021 16-byte marker at end of calldata (8× 0x8021) */
+const ERC_8021_MARKER = '80218021802180218021802180218021';
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes)
