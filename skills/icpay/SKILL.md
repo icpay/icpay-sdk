@@ -304,7 +304,7 @@ Use this when you are an AI agent that must **create the user, verify email, log
 
    - **Payouts (require email code)**
      - `GET /user/payouts?accountId=<uuid>` — List payouts.
-     - `POST /user/payouts` — Create payout. Body: `accountId`, `amount` (decimal string), optional `ledgerId`, `ledgerCanisterId`, `accountCanisterId`, `toWalletAddress`, `toWalletSubaccount`, and **`emailSecurityCode` or `securityCode`** (code from email). Only OWNER or admin with payouts permission.
+     - `POST /user/payouts` — Create payout. Body: `accountId`, `amount` (decimal string), `ledgerId`, optional `ledgerCanisterId`, `accountCanisterId`, `toWalletAddress`, `toWalletSubaccount`, and **`emailSecurityCode` or `securityCode`** (code from email). Only OWNER or admin with payouts permission.
      - `POST /user/payouts/:id/execute` — Execute a created payout.
 
    - **Webhook endpoints**
