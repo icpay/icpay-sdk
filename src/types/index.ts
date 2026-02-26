@@ -618,6 +618,25 @@ export interface SdkWallet {
   updatedAt: string;
 }
 
+/** Single ledger balance as returned by wallet with-balances endpoints. */
+export interface SdkWalletBalanceEntry {
+  ledgerId: string;
+  ledgerName: string;
+  ledgerSymbol: string;
+  balance: string;
+  formattedBalance: string;
+  decimals: number;
+  lastUpdated: string | Date;
+  currentPrice?: number;
+  priceFetchMethod?: string;
+  lastPriceUpdate?: string | Date;
+}
+
+/** Wallet with per-ledger balances (e.g. from GET /sdk/wallets/:id/with-balances or user-wallets/:id/with-balances). */
+export interface SdkWalletWithBalances extends SdkWallet {
+  balances: SdkWalletBalanceEntry[];
+}
+
 export interface SdkWebhookEvent {
   id: string;
   webhookEndpointId: string;

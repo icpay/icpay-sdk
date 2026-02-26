@@ -36,6 +36,8 @@ export type ProtectedApi = {
   getPaymentsByPrincipal(request: GetPaymentsByPrincipalRequest): Promise<PaymentHistoryResponse>;
   getPaymentsByMetadata(request: GetPaymentsByMetadataRequest): Promise<PaymentHistoryResponse>;
   getAccountWalletBalances(): Promise<AllLedgerBalances>;
+  /** All ledger balances for the account (all internal wallets). Uses GET /sdk/wallets/with-balances. */
+  getWalletsWithBalances(): Promise<AllLedgerBalances>;
 };
 
 export function createProtectedApi(params: {
@@ -413,6 +415,40 @@ export function createProtectedApi(params: {
           details: error,
         });
         emitError('getAccountWalletBalances', err);
+        throw err;
+      }
+    },
+
+    async getWalletsWithBalances(): Promise<AllLedgerBalances> {
+      requireSecretKey('getWalletsWithBalances');
+      emitStart('getWalletsWithBalances');
+      try {
+        const response: any = await privateApiClient!.get('/sdk/wallets/with-balances');
+        const result: AllLedgerBalances = {
+          balances: (response.balances || []).map((balance: any) => ({
+            ledgerId: balance.ledgerId,
+            ledgerName: balance.ledgerName,
+            ledgerSymbol: balance.ledgerSymbol,
+            canisterId: balance.canisterId,
+            balance: balance.balance,
+            formattedBalance: balance.formattedBalance,
+            decimals: balance.decimals,
+            currentPrice: balance.currentPrice,
+            lastPriceUpdate: balance.lastPriceUpdate ? new Date(balance.lastPriceUpdate) : undefined,
+            lastUpdated: new Date(balance.lastUpdated),
+          } as LedgerBalance)),
+          totalBalancesUSD: response.totalBalancesUSD,
+          lastUpdated: new Date(response.lastUpdated),
+        };
+        emitSuccess('getWalletsWithBalances', { count: result.balances.length, totalUSD: result.totalBalancesUSD });
+        return result;
+      } catch (error) {
+        const err = new IcpayError({
+          code: 'WALLET_WITH_BALANCES_FETCH_FAILED',
+          message: 'Failed to fetch wallets with balances',
+          details: error,
+        });
+        emitError('getWalletsWithBalances', err);
         throw err;
       }
     },
