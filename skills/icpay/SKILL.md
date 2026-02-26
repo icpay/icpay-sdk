@@ -1,6 +1,6 @@
 ---
 name: icpay
-description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, SDK events (icpay-sdk-transaction-completed for success, transaction lifecycle, method start/success/error), or any ICPay-related code in the icpay monorepo.
+description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, SDK events (icpay-sdk-transaction-completed for success, transaction lifecycle, method start/success/error), account and wallet balances (user-wallets/with-balances, SDK getAccountWalletBalances and getWalletsWithBalances), or any ICPay-related code in the icpay monorepo.
 # Canonical source: this repo. npm: @ic-pay/icpay-sdk. Widget: @ic-pay/icpay-widget.
 source: https://github.com/icpay/icpay-sdk/tree/master/skills/icpay
 ---
@@ -65,7 +65,13 @@ const tx = await icpay.createPaymentUsd({
 
 **X402 v2 (IC, EVM, Solana):** Use `createPaymentX402Usd(request)` for sign-and-settle flows; SDK builds EIP-712 (EVM) or Solana message/transaction, sends to ICPay facilitator, returns terminal status. Fallback to regular `createPaymentUsd` when X402 not available. When you have an existing payment intent (e.g. from a pay link), pass **`paymentIntentId`** or **`paymentIntent`** in config or in the request so the SDK sends it to the x402 intent endpoint and the API reuses that intent instead of creating a second one.
 
-**Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, etc.
+**Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, `getAccountWalletBalances`, `getWalletsWithBalances`, etc.
+
+**Account and wallet balances (how to get balances):**
+- **User-wallets with-balances (JWT):** The current way to get balances for a specific wallet when you have the wallet id and user auth. Call `GET https://api.icpay.org/user-wallets/<walletId>/with-balances` with `Authorization: Bearer <JWT>`. When using the icpay.org web app, requests go through the proxy: `GET https://icpay.org/api/proxy/user-wallets/<walletId>/with-balances` (session cookie is sent automatically). Response: wallet object with a `balances` array (per-ledger balance, formattedBalance, decimals, currentPrice, etc.).
+- **SDK secret key (recommended for server/agents):** Use the protected API with the account’s secret key:
+  - **Aggregated account balances:** `icpay.protected.getAccountWalletBalances()` — returns balances across all wallets of the account (same as `GET https://api.icpay.org/sdk/account/wallet-balances` with `Authorization: Bearer <secret_key>`).
+  - **All account wallets with balances:** `icpay.protected.getWalletsWithBalances()` — returns all ledger balances for the account (all internal wallets; same shape as `getAccountWalletBalances`). Same as `GET https://api.icpay.org/sdk/wallets/with-balances` with `Authorization: Bearer <secret_key>`.
 
 Prefer SDK methods over raw fetch. Handle errors via `IcpayError`; subscribe to SDK events for lifecycle (see **SDK events** below).
 
@@ -293,6 +299,13 @@ Use this when you are an AI agent that must **create the user, verify email, log
      - `PUT /user/payment-links/:id` — Update. Body: `UpdatePaymentLinkDto` (same fields as create, partial).
      - `DELETE /user/payment-links/:id` — Delete payment link.
      - `GET /user/payment-links/:id/submissions` — List submissions for the link.
+
+   - **User wallets and balances**
+     - `GET /user-wallets/account/:accountId` — List wallets for account (JWT). Requires membership.
+     - `GET /user-wallets/:walletId/with-balances` — Get one wallet with per-ledger balances (JWT). **Current way to get balances** when using user auth. When using icpay.org, call via proxy: `GET https://icpay.org/api/proxy/user-wallets/<walletId>/with-balances` (session cookie). Direct API: `GET https://api.icpay.org/user-wallets/<walletId>/with-balances` with `Authorization: Bearer <JWT>`.
+     - **SDK (secret key)** — Use when you have the account’s secret key (server/agent):
+       - `GET /sdk/account/wallet-balances` — Aggregated balances for all wallets of the account. Header: `Authorization: Bearer <secret_key>`.
+       - `GET /sdk/wallets/with-balances` — All ledger balances for the account (all internal wallets). Header: `Authorization: Bearer <secret_key>`.
 
    - **Payments (list, get, refund)**
      - `GET /user/payments?accountId=<uuid>` — List payments (with pagination).

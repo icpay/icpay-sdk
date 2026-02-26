@@ -1008,14 +1008,25 @@ export class Icpay {
             (sol as any)?.isPhantom ||
             (((w as any)?.phantom?.solana) && ((w as any).phantom.solana === (sol as any)))
           );
-          if (isPhantom) {
-            // Prefer sign-only flow: signTransaction, then relay via backend (avoids Phantom simulation warning)
+          // Solflare SPL: signAndSendTransaction shows wrong-format error; use signTransaction+relay (same as Phantom) so only one correct popup.
+          const isSolflare = !!(sol as any)?.isSolflare;
+          const isSplToken = !!(params.ledgerCanisterId && String(params.ledgerCanisterId).trim());
+          const useSignThenRelay = isPhantom || (isSolflare && isSplToken);
+          if (useSignThenRelay) {
+            // Prefer sign-only flow: signTransaction, then relay via backend (avoids Phantom simulation warning / Solflare SPL wrong-format popup)
             const msgB58 = base58Encode(u8FromBase64(prebuiltBase64));
             let signedTxB64: string | null = null;
             let signerSigBase58: string | null = null;
             // Try multiple parameter shapes for maximum compatibility
             let r: any = null;
-            try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {}
+            // Solflare: message/base58 triggers "Invalid transaction" popup; try transaction (base64) first so only one correct popup.
+            if (isSolflare) {
+              try { r = await (sol as any).request({ method: 'signTransaction', params: { transaction: prebuiltBase64 } }); } catch {}
+              if (!r) try { r = await (sol as any).request({ method: 'solana:signTransaction', params: { transaction: prebuiltBase64 } }); } catch {}
+            }
+            if (!r) {
+              try { r = await (sol as any).request({ method: 'signTransaction', params: { message: msgB58 } }); } catch {}
+            }
             if (!r) {
               try { r = await (sol as any).request({ method: 'signTransaction', params: msgB58 as any }); } catch {}
             }
