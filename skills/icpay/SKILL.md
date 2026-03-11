@@ -65,6 +65,51 @@ const tx = await icpay.createPaymentUsd({
 
 **X402 v2 (IC, EVM, Solana):** Use `createPaymentX402Usd(request)` for sign-and-settle flows; SDK builds EIP-712 (EVM) or Solana message/transaction, sends to ICPay facilitator, returns terminal status. Fallback to regular `createPaymentUsd` when X402 not available. When you have an existing payment intent (e.g. from a pay link), pass **`paymentIntentId`** or **`paymentIntent`** in config or in the request so the SDK sends it to the x402 intent endpoint and the API reuses that intent instead of creating a second one.
 
+**X402 up-to (agentic / usage-based):**
+
+- Frontend (publishable key) can request an X402 **up-to** scheme by setting `x402Upto: true` in `createPaymentX402Usd`:
+
+  ```ts
+  const icpay = new Icpay({ publishableKey: 'pk_test_xxx', apiUrl: 'https://api.icpay.org' });
+
+  const x402Init = await icpay.createPaymentX402Usd({
+    usdAmount: 25,
+    tokenShortcode: 'base_usdc',
+    metadata: { orderId: 'job-123', context: 'agentic-x402' },
+    x402Upto: true,
+  });
+  ```
+
+  - ICPay creates a payment intent with `x402_upto = true` and returns an X402 acceptance with `scheme: 'upto'` and `maxAmountRequired` (cap).
+  - SDK drives X402 authorization (wallet signs EIP‑712 or Solana message) but **does not** auto-settle via `/sdk/public/payments/x402/settle` for up-to.
+  - Use this when you want the user/agent to sign a **maximum** budget but decide final cost later.
+
+- Backend (secret key) settles later once the real cost in USD is known, via `protected.settleX402Upto`:
+
+  ```ts
+  const icpayBackend = new Icpay({
+    secretKey: process.env.ICPAY_SECRET_KEY!,
+    apiUrl: process.env.ICPAY_API_URL!,
+  });
+
+  // After your service computes usageUsd (actual cost in fiat), ensuring it should not exceed the cap:
+  const result = await icpayBackend.protected.settleX402Upto({
+    paymentIntentId: 'pi_123',
+    settledAmountUsd: usageUsd,
+  });
+
+  if (!result.ok) {
+    // Handle failure; result.error contains reason
+  }
+  ```
+
+  - This hits `POST /sdk/payments/x402/upto/settle` on icpay-api, which:
+    - Verifies the intent belongs to the account and has `x402_upto = true`.
+    - Converts `settledAmountUsd` to token units using the ledger’s current USD price and decimals.
+    - Enforces `0 < tokenAmount <= maxAmountRequired` (the authorized cap).
+    - Triggers icpay-services to settle on-chain using the stored X402 authorization.
+  - Combine this pattern with `icpay.protected.getPaymentById` and/or webhooks when building **agentic** or **usage-based** payment flows.
+
 **Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, `getAccountWalletBalances`, `getWalletsWithBalances`, etc.
 
 **Account and wallet balances (how to get balances):**
