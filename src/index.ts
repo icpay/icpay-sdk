@@ -1545,14 +1545,60 @@ export class Icpay {
       const tokenShortcode: string | undefined = (request as any)?.tokenShortcode;
       const isOnrampFlow = ((request as any)?.onrampPayment === true) || ((this as any)?.config?.onrampPayment === true);
       const hasPaymentIntent = (request as any)?.paymentIntent != null || (this.config as any)?.paymentIntent != null || (typeof (this.config as any)?.paymentIntentId === 'string' && (this.config as any).paymentIntentId);
-      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow && !hasPaymentIntent) {
+      const isStripeFlow = (request as any).networkType === 'stripe' || (request as any).paymentMethod === 'stripe';
+      if (!ledgerCanisterId && !tokenShortcode && !(request as any).symbol && !isOnrampFlow && !hasPaymentIntent && !isStripeFlow) {
         const err = new IcpayError({
           code: ICPAY_ERROR_CODES.INVALID_CONFIG,
-          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated), or pass paymentIntent.',
+          message: 'Provide either tokenShortcode or ledgerCanisterId (symbol is deprecated), pass paymentIntent, or use networkType: "stripe".',
           details: { request }
         });
         this.emitMethodError('createPayment', err);
         throw err;
+      }
+
+      if (isStripeFlow && this.publicApiClient) {
+        const amountUsd = (request as any).amountUsd != null ? Number((request as any).amountUsd) : undefined;
+        const amountCents = (request as any).amountCents != null ? Number((request as any).amountCents) : undefined;
+        if (amountUsd == null && amountCents == null) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+            message: 'Stripe payment requires amountUsd or amountCents.',
+            details: { request },
+          });
+          this.emitMethodError('createPayment', err);
+          throw err;
+        }
+        const stripeResp = await this.publicApiClient.post('/sdk/public/payments/intents/stripe/checkout', {
+          amountUsd: amountUsd ?? undefined,
+          amountCents: amountCents ?? undefined,
+          description: (request as any).description,
+          metadata: (request as any).metadata || {},
+          fiat_currency: (request as any).fiat_currency,
+          returnUrl: (request as any).returnUrl,
+        });
+        const checkoutUrl = stripeResp?.checkoutUrl;
+        const paymentIntentId = stripeResp?.paymentIntentId;
+        if (!checkoutUrl) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.API_ERROR,
+            message: 'Stripe checkout session created but no checkoutUrl returned.',
+            details: stripeResp,
+          });
+          this.emitMethodError('createPayment', err);
+          throw err;
+        }
+        const out: TransactionResponse = {
+          transactionId: 0,
+          status: 'pending',
+          amount: String(amountCents ?? Math.round((amountUsd ?? 0) * 100)),
+          recipientCanister: '',
+          timestamp: new Date(),
+          payment: undefined,
+          checkoutUrl,
+        };
+        (out as any).paymentIntentId = paymentIntentId ?? undefined;
+        this.emitMethodSuccess('createPayment', out);
+        return out;
       }
 
       let memo: Uint8Array | undefined = undefined;

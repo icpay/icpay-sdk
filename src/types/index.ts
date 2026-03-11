@@ -201,6 +201,12 @@ export interface CreateTransactionRequest {
    * instead of creating a new intent. Can be full ResolvedPaymentIntentLike or { id: string } to fetch.
    */
   paymentIntent?: ResolvedPaymentIntentLike | PaymentIntentIdOnly;
+  /** When 'stripe', create a Stripe (credit card) payment intent; no wallet required. Use with amountUsd or amountCents. */
+  networkType?: 'ic' | 'evm' | 'sol' | 'stripe';
+  /** Alias for networkType === 'stripe'. When true, creates Stripe payment intent and returns clientSecret. */
+  paymentMethod?: 'stripe';
+  /** Optional: return URL for hosted flows (e.g. Stripe Checkout). */
+  returnUrl?: string;
 }
 
 export interface TransactionResponse {
@@ -212,6 +218,8 @@ export interface TransactionResponse {
   description?: string;
   metadata?: Record<string, any>;
   payment?: PublicNotifyResponse;
+  /** For Stripe flow: hosted checkout URL to open in a new tab. */
+  checkoutUrl?: string;
 }
 
 export interface TransactionStatus {
