@@ -38,6 +38,16 @@ export type ProtectedApi = {
   getAccountWalletBalances(): Promise<AllLedgerBalances>;
   /** All ledger balances for the account (all internal wallets). Uses GET /sdk/wallets/with-balances. */
   getWalletsWithBalances(): Promise<AllLedgerBalances>;
+  /** Settle an X402 up-to intent by specifying final settledAmount (secret key only). */
+  settleX402Upto(params: {
+    paymentIntentId: string;
+    settledAmount: string | number;
+  }): Promise<{
+    ok: boolean;
+    error?: string;
+    intentStatus?: string;
+    settledAmount?: string;
+  }>;
 };
 
 export function createProtectedApi(params: {
@@ -382,6 +392,45 @@ export function createProtectedApi(params: {
         });
         emitError('getPaymentsByMetadata', err);
         throw err;
+      }
+    },
+
+    /**
+     * Settle an X402 up-to payment intent by specifying the final settledAmount.
+     * Requires secretKey + accountId (server-side only).
+     */
+    async settleX402Upto(params: {
+      paymentIntentId: string;
+      settledAmount: string | number;
+    }): Promise<{
+      ok: boolean;
+      error?: string;
+      intentStatus?: string;
+      settledAmount?: string;
+    }> {
+      requireSecretKey('settleX402Upto');
+      emitStart('settleX402Upto', {
+        paymentIntentId: params.paymentIntentId,
+        settledAmount: params.settledAmount,
+      });
+      try {
+        const res: any = await privateApiClient!.post('/sdk/payments/x402/upto/settle', {
+          paymentIntentId: params.paymentIntentId,
+          settledAmount: params.settledAmount,
+        });
+        emitSuccess('settleX402Upto', {
+          paymentIntentId: params.paymentIntentId,
+          settledAmount: params.settledAmount,
+        });
+        return res as {
+          ok: boolean;
+          error?: string;
+          intentStatus?: string;
+          settledAmount?: string;
+        };
+      } catch (error) {
+        emitError('settleX402Upto', error);
+        throw error;
       }
     },
 

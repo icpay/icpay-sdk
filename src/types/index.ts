@@ -726,6 +726,8 @@ export interface CreatePaymentUsdRequest {
   };
   /** Fiat currency for display: id or code (e.g. USD). Defaults to USD if missing. */
   fiat_currency?: string;
+  /** When true, create an x402 intent that uses the 'upto' scheme instead of 'exact'. */
+  x402Upto?: boolean;
 }
 
 // Payments types
