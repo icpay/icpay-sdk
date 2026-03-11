@@ -2513,6 +2513,7 @@ export class Icpay {
         x402: true,
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
+        x402Upto: Boolean((request as any).x402Upto),
       };
       if (existingIntentId) {
         body.paymentIntentId = existingIntentId;
@@ -2576,6 +2577,26 @@ export class Icpay {
             let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
 
             if (requirement) {
+              const isUpto = String((requirement as any)?.scheme || '').toLowerCase() === 'upto' || Boolean((request as any).x402Upto);
+              if (isUpto) {
+                // For upto flows, do not auto-settle. Return intent + accepts so caller (widget/backend)
+                // can start work and later settle via secret-key API.
+                const deferred = {
+                  transactionId: 0,
+                  status: 'pending',
+                  amount: (acceptsArr[0]?.maxAmountRequired || request.usdAmount)?.toString?.() || String(request.usdAmount),
+                  recipientCanister: ledgerCanisterId,
+                  timestamp: new Date(),
+                  metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_x402_upto: true },
+                  payment: {
+                    x402Version: data?.x402Version,
+                    paymentIntentId,
+                    accepts: acceptsArr,
+                  },
+                } as any;
+                this.emitMethodSuccess('createPaymentX402Usd', deferred);
+                return deferred;
+              }
               // Determine network once for error handling policy
               const isSol = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('solana:');
               try {
