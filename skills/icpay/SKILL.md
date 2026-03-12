@@ -82,7 +82,10 @@ const tx = await icpay.createPaymentUsd({
 
   - ICPay creates a payment intent with `x402_upto = true` and returns an X402 acceptance with `scheme: 'upto'` and `maxAmountRequired` (cap).
   - SDK drives X402 authorization (wallet signs EIP‑712 or Solana message) but **does not** auto-settle via `/sdk/public/payments/x402/settle` for up-to.
-  - Use this when you want the user/agent to sign a **maximum** budget but decide final cost later.
+  - For EVM up-to flows, the SDK builds a signed X402 v2 header and exposes it on the response:
+    - `x402Init.payment.paymentHeader` — base64-encoded header containing the signed EIP‑712/EIP‑3009 payload (including `maxAmount`, `validBefore`, `nonce`, etc.).
+    - `x402Init.payment.paymentRequirements` — the exact requirement used for signing (same shape as items in `accepts[]`).
+  - Use this when you want the user/agent to sign a **maximum** budget but decide final cost later; **forward `paymentHeader` and `paymentIntentId` to your backend**.
 
 - Backend (secret key) settles later once the real cost in USD is known, via `protected.settleX402Upto`:
 
@@ -93,9 +96,12 @@ const tx = await icpay.createPaymentUsd({
   });
 
   // After your service computes usageUsd (actual cost in fiat), ensuring it should not exceed the cap:
+  // and has stored the signed header from the frontend (optional but recommended):
   const result = await icpayBackend.protected.settleX402Upto({
     paymentIntentId: 'pi_123',
     settledAmountUsd: usageUsd,
+    // Optional: if you proxy the header, send it so icpay-api can persist it:
+    // paymentHeader,
   });
 
   if (!result.ok) {
@@ -107,6 +113,7 @@ const tx = await icpay.createPaymentUsd({
     - Verifies the intent belongs to the account and has `x402_upto = true`.
     - Converts `settledAmountUsd` to token units using the ledger’s current USD price and decimals.
     - Enforces `0 < tokenAmount <= maxAmountRequired` (the authorized cap).
+    - If `paymentHeader` is provided and not already stored, decodes and persists it (including `validBefore`) on the payment intent for icpay-services to consume.
     - Triggers icpay-services to settle on-chain using the stored X402 authorization.
   - Combine this pattern with `icpay.protected.getPaymentById` and/or webhooks when building **agentic** or **usage-based** payment flows.
 
