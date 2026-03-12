@@ -2577,26 +2577,6 @@ export class Icpay {
             let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
 
             if (requirement) {
-              const isUpto = String((requirement as any)?.scheme || '').toLowerCase() === 'upto' || Boolean((request as any).x402Upto);
-              if (isUpto) {
-                // For upto flows, do not auto-settle. Return intent + accepts so caller (widget/backend)
-                // can start work and later settle via secret-key API.
-                const deferred = {
-                  transactionId: 0,
-                  status: 'pending',
-                  amount: (acceptsArr[0]?.maxAmountRequired || request.usdAmount)?.toString?.() || String(request.usdAmount),
-                  recipientCanister: ledgerCanisterId,
-                  timestamp: new Date(),
-                  metadata: { ...(request.metadata || {}), icpay_x402: true, icpay_x402_upto: true },
-                  payment: {
-                    x402Version: data?.x402Version,
-                    paymentIntentId,
-                    accepts: acceptsArr,
-                  },
-                } as any;
-                this.emitMethodSuccess('createPaymentX402Usd', deferred);
-                return deferred;
-              }
               // Determine network once for error handling policy
               const isSol = typeof (requirement as any)?.network === 'string' && String((requirement as any).network).toLowerCase().startsWith('solana:');
               try {
@@ -2736,12 +2716,43 @@ export class Icpay {
                   this.emitMethodSuccess('createPaymentX402Usd', waitedIc);
                   return waitedIc;
                 }
+                const isUpto =
+                  String((requirement as any)?.scheme || '').toLowerCase() === 'upto' ||
+                  Boolean((request as any).x402Upto);
                 if (!isSol) {
                   paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
                     x402Version: Number(data?.x402Version || 2),
                     debug: this.config?.debug || false,
                     provider: providerForHeader,
                   });
+                  if (isUpto) {
+                    // For upto EVM flows, do not auto-settle. Return intent + accepts + signed header
+                    // so the caller (widget/backend) can later settle via secret-key API.
+                    const deferred = {
+                      transactionId: 0,
+                      status: 'pending',
+                      amount:
+                        (acceptsArr[0]?.maxAmountRequired || request.usdAmount)?.toString?.() ||
+                        String(request.usdAmount),
+                      recipientCanister: ledgerCanisterId,
+                      timestamp: new Date(),
+                      metadata: {
+                        ...(request.metadata || {}),
+                        icpay_x402: true,
+                        icpay_x402_upto: true,
+                      },
+                      paymentIntentId,
+                      payment: {
+                        x402Version: data?.x402Version,
+                        paymentIntentId,
+                        accepts: acceptsArr,
+                        paymentHeader,
+                        paymentRequirements: requirement,
+                      },
+                    } as any;
+                    this.emitMethodSuccess('createPaymentX402Usd', deferred);
+                    return deferred;
+                  }
                 }
                 if (isSol) {
                   // Solana x402: follow standard flow (https://solana.com/developers/guides/getstarted/intro-to-x402)
