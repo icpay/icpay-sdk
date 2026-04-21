@@ -1521,7 +1521,10 @@ export class Icpay {
     if (intentId && this.publicApiClient) {
       try {
         debugLog(this.config.debug || false, 'fetching payment intent by id', { intentId });
-        const resp = await this.publicApiClient.get(`/sdk/public/payments/intents/${encodeURIComponent(intentId)}`);
+        const path = `/sdk/public/payments/intents/${encodeURIComponent(intentId)}`;
+        const resp = this.config.publishableKey
+          ? await this.publicApiClient.getPublic(path, { publishableKey: this.config.publishableKey })
+          : await this.publicApiClient.get(path);
         if (resp?.paymentIntent) {
           return { paymentIntent: resp.paymentIntent, onramp: resp.onramp ?? null };
         }
@@ -1627,7 +1630,10 @@ export class Icpay {
               if (tokenToSet && typeof tokenToSet === 'string' && this.publicApiClient) {
                 try {
                   await this.publicApiClient.patch(`/sdk/public/payments/intents/${encodeURIComponent(pi.id)}/set-token`, { tokenShortcode: tokenToSet.trim() });
-                  const refetched = await this.publicApiClient.get(`/sdk/public/payments/intents/${encodeURIComponent(pi.id)}`);
+                  const refetchPath = `/sdk/public/payments/intents/${encodeURIComponent(pi.id)}`;
+                  const refetched = this.config.publishableKey
+                    ? await this.publicApiClient.getPublic(refetchPath, { publishableKey: this.config.publishableKey })
+                    : await this.publicApiClient.get(refetchPath);
                   if (refetched?.paymentIntent) pi = refetched.paymentIntent;
                 } catch (e) {
                   debugLog(this.config.debug || false, 'set-token failed', e);
