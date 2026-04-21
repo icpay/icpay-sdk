@@ -1600,6 +1600,17 @@ export class Icpay {
           checkoutUrl,
         };
         (out as any).paymentIntentId = paymentIntentId ?? undefined;
+        if (paymentIntentId) {
+          try {
+            this.emit('icpay-sdk-transaction-created', {
+              paymentIntentId,
+              amount: String(amountCents ?? Math.round((amountUsd ?? 0) * 100)),
+              ledgerCanisterId: 'stripe_usd',
+              expectedSenderPrincipal: undefined,
+              accountCanisterId: undefined,
+            });
+          } catch {}
+        }
         this.emitMethodSuccess('createPayment', out);
         return out;
       }
