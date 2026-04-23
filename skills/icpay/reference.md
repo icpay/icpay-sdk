@@ -72,6 +72,7 @@ The SDK emits events for agents and apps to listen to: **`icpay-sdk-transaction-
 
 - Supported for IC, EVM, and Solana. Flow: get acceptance(s) from API → client signs (EIP-712 for EVM, message/tx for Solana) → settle via facilitator. SDK: `createPaymentX402Usd`; fallback to regular createPaymentUsd when X402 not available. Docs: `icpay-docs/src/app/x402/page.mdx`.
 - **Payment intent reuse:** When the client already has a payment intent (e.g. pay link or POS), the SDK sends **paymentIntentId** in the body to `POST /sdk/public/payments/intents/x402`. The API reuses that intent when valid (same account, status requires_payment or processing), merges x402 metadata, and returns it instead of creating a new intent so one intent is used for the full flow.
+- **Up-to (widget):** Pay button **`x402Upto`** + tailored progress; **`x402UptoSkipSettlementWait`** skips polling after **`POST /sdk/public/payments/intents/x402/upto/confirm`**; window event **`icpay-x402-upto-submitted`**. **Webhook `x402_upto_authorization_received`** (dashboard) fires when confirm persists the header — use for server sync. See `icpay-docs` agentic-x402 + webhooks pages and [SKILL.md](SKILL.md).
 
 ## Split payments
 
