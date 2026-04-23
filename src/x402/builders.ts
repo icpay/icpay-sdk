@@ -418,10 +418,44 @@ export async function buildAndSignX402PaymentHeader(
     } catch {}
   }
   const payload = JSON.stringify(typedData);
-  const signature = await eth.request({
-    method: 'eth_signTypedData_v4',
-    params: [from, payload],
-  });
+  if (context?.debug) {
+    try {
+      // eslint-disable-next-line no-console
+      console.log('X402 EVM requesting signature', {
+        method: 'eth_signTypedData_v4',
+        from,
+        payloadLength: payload.length,
+      });
+    } catch {}
+  }
+  let signature: string;
+  try {
+    signature = await eth.request({
+      method: 'eth_signTypedData_v4',
+      params: [from, payload],
+    });
+  } catch (signErr) {
+    if (context?.debug) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('X402 EVM signature request failed', {
+          error: signErr instanceof Error ? signErr.message : String(signErr),
+          code: (signErr as any)?.code ?? null,
+          data: (signErr as any)?.data ?? null,
+        });
+      } catch {}
+    }
+    throw signErr;
+  }
+  if (context?.debug) {
+    try {
+      // eslint-disable-next-line no-console
+      console.log('X402 EVM signature received', {
+        signatureLength: typeof signature === 'string' ? signature.length : 0,
+        signaturePrefix: typeof signature === 'string' ? signature.slice(0, 10) : null,
+      });
+    } catch {}
+  }
 
   const headerObj = buildX402HeaderFromAuthorization({
     x402Version: Number(context?.x402Version || 1),
