@@ -2495,6 +2495,38 @@ export class Icpay {
   }
 
   /**
+   * After the wallet signs an x402 **up-to** EVM authorization, call this (publishable key) so the API
+   * stores the header and emits webhook `x402_upto_authorization_received`. Settlement stays secret-key only.
+   */
+  async confirmX402UptoAuthorization(params: {
+    paymentIntentId: string;
+    paymentHeader: string;
+    paymentRequirements: any;
+  }): Promise<{
+    ok: boolean;
+    alreadyConfirmed?: boolean;
+    paymentIntent?: any;
+    error?: string;
+    invalidReason?: string;
+    message?: string;
+    status?: string;
+  }> {
+    const paymentIntentId = String(params?.paymentIntentId || '').trim();
+    const paymentHeader = String(params?.paymentHeader || '').trim();
+    const paymentRequirements = params?.paymentRequirements;
+    if (!paymentIntentId || !paymentHeader || paymentRequirements == null) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'paymentIntentId, paymentHeader, and paymentRequirements are required for confirmX402UptoAuthorization',
+      });
+    }
+    return await this.publicApiClient.post(
+      '/sdk/public/payments/intents/x402/upto/confirm',
+      { paymentIntentId, paymentHeader, paymentRequirements },
+    );
+  }
+
+  /**
    * Create an X402 payment from a USD amount
    * Falls back to regular flow at caller level if unavailable.
    */
@@ -2579,18 +2611,12 @@ export class Icpay {
           this.emitMethodSuccess('createPaymentX402Usd', fallback);
           return fallback;
         }
-        // If backend returned accepts despite 200, keep previous behavior (pending with x402 metadata)
-        const normalized = {
-          transactionId: 0,
-          status: 'pending',
-          amount: (resp?.paymentIntent?.amount || resp?.amount || request.usdAmount)?.toString?.() || String(request.usdAmount),
-          recipientCanister: ledgerCanisterId,
-          timestamp: new Date(),
-          metadata: { ...(request.metadata || {}), icpay_x402: true },
-          payment: resp,
+        // Always route accepts[] responses into the 402 signing branch.
+        // This avoids skipping wallet signature when HTTP clients normalize response handling.
+        throw {
+          status: 402,
+          data: resp,
         } as any;
-        this.emitMethodSuccess('createPaymentX402Usd', normalized);
-        return normalized;
       } catch (e: any) {
         // If API responds with HTTP 402 to trigger wallet X402 flow, begin settlement wait instead of erroring
         if (e && typeof e.status === 'number' && e.status === 402) {
@@ -2760,12 +2786,35 @@ export class Icpay {
                   String((requirement as any)?.scheme || '').toLowerCase() === 'upto' ||
                   Boolean((request as any).x402Upto);
                 if (!isSol) {
+                  try {
+                    debugLog(this.config?.debug || false, 'x402 evm signing start', {
+                      paymentIntentId,
+                      network: (requirement as any)?.network || null,
+                      scheme: (requirement as any)?.scheme || null,
+                      isUpto,
+                      hasProvider: Boolean(providerForHeader),
+                      hasProviderRequest: Boolean((providerForHeader as any)?.request),
+                    });
+                  } catch {}
                   paymentHeader = await buildAndSignX402PaymentHeader(requirement, {
                     x402Version: Number(data?.x402Version || 2),
                     debug: this.config?.debug || false,
                     provider: providerForHeader,
                   });
+                  try {
+                    debugLog(this.config?.debug || false, 'x402 evm signing complete', {
+                      paymentIntentId,
+                      hasPaymentHeader: Boolean(paymentHeader),
+                      paymentHeaderLength: paymentHeader ? String(paymentHeader).length : 0,
+                    });
+                  } catch {}
                   if (isUpto) {
+                    if (!paymentHeader) {
+                      throw new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'X402 upto signing did not return payment header',
+                      });
+                    }
                     // For upto EVM flows, do not auto-settle. Return intent + accepts + signed header
                     // so the caller (widget/backend) can later settle via secret-key API.
                     const deferred = {

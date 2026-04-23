@@ -42,6 +42,7 @@ export type ProtectedApi = {
   settleX402Upto(params: {
     paymentIntentId: string;
     settledAmountUsd: string | number;
+    paymentHeader?: string;
   }): Promise<{
     ok: boolean;
     error?: string;
@@ -398,6 +399,7 @@ export function createProtectedApi(params: {
     async settleX402Upto(params: {
       paymentIntentId: string;
       settledAmountUsd: string | number;
+      paymentHeader?: string;
     }): Promise<{
       ok: boolean;
       error?: string;
@@ -413,6 +415,7 @@ export function createProtectedApi(params: {
         const res: any = await privateApiClient!.post('/sdk/payments/x402/upto/settle', {
           paymentIntentId: params.paymentIntentId,
           settledAmountUsd: params.settledAmountUsd,
+          ...(params.paymentHeader ? { paymentHeader: params.paymentHeader } : {}),
         });
         emitSuccess('settleX402Upto', {
           paymentIntentId: params.paymentIntentId,
