@@ -1,6 +1,6 @@
 ---
 name: icpay
-description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, SDK events (icpay-sdk-transaction-completed for success, transaction lifecycle, method start/success/error), account and wallet balances (user-wallets/with-balances, SDK getAccountWalletBalances and getWalletsWithBalances), or any ICPay-related code in the icpay monorepo.
+description: Integrates and extends the ICPay crypto payments platform. Use when working with icpay-widget, icpay-sdk, payment links, merchant accounts, relay payments (recipient EVM/IC/Solana), X402 v2, X402 up-to (`x402Upto`, `x402UptoSkipSettlementWait`, `icpay-x402-upto-submitted`, webhook `x402_upto_authorization_received`, pay-button progress), refunds, split payments, email notifications, webhooks, demo.icpay.org, betterstripe.com sandbox (testnets), filter tokens/chains, WalletConnect QR and deep links, wallet adapters, currency for payment links and profile, WordPress plugins (Instant Crypto Payments, WooCommerce), registration on icpay.org, creating an account, API keys (publishable and secret), .env for keys, SDK events (icpay-sdk-transaction-completed for success, transaction lifecycle, method start/success/error), account and wallet balances (user-wallets/with-balances, SDK getAccountWalletBalances and getWalletsWithBalances), or any ICPay-related code in the icpay monorepo.
 # Canonical source: this repo. npm: @ic-pay/icpay-sdk. Widget: @ic-pay/icpay-widget.
 source: https://github.com/icpay/icpay-sdk/tree/master/skills/icpay
 ---
@@ -117,6 +117,57 @@ const tx = await icpay.createPaymentUsd({
     - Triggers icpay-services → `PaymentProcessor.payWithSignatureUpto` (EVM): EIP-3009 pull for the **signed max**, platform fee and splits on the **settled** token amount, **refund of unused cap** to the payer in the same tx (`PaymentProcessor` v1.3.0+).
   - Combine this pattern with `icpay.protected.getPaymentById` and/or webhooks when building **agentic** or **usage-based** payment flows.
 
+**Webhook (ICPay dashboard): `x402_upto_authorization_received`**
+
+- Emitted when **`POST /sdk/public/payments/intents/x402/upto/confirm`** succeeds (EVM, publishable key): ICPay persisted the signed X402 header on the intent.
+- **`event.type`:** `x402_upto_authorization_received`. **`data.object`:** payment-intent-shaped payload (`id` / `paymentIntentId`, `status`, `amount`, `amountUsd`, `ledgerCanisterId`, `payer`, `metadata`, `intentCode`, …) — see **icpay-docs** [Webhooks](https://docs.icpay.org/webhooks#event-x402-upto-authorization-received).
+- **Use this to sync your server** with the browser: do not rely only on `onX402UptoIntent` or `icpay-x402-upto-submitted` from the client. Especially with **`x402UptoSkipSettlementWait`**, the widget may not poll until `payment.completed`; this webhook is the **authoritative** signal that authorization is stored **before** settlement.
+- Still handle **`payment.completed`** for final fulfillment after `protected.settleX402Upto` and on-chain settlement.
+
+**Widget (`icpay-pay-button`) — X402 up-to progress and `x402UptoSkipSettlementWait`:**
+
+- With **`x402Upto: true`** and the default progress bar, **`icpay-progress-bar`** shows **up-to-specific steps**: wallet ready → sign authorization → submit authorization (after SDK returns signed header; EVM confirm to API) → settlement (poll until intent terminal, or pending if skipping wait).
+- After EVM **`POST /sdk/public/payments/intents/x402/upto/confirm`**, the pay button dispatches a window event **`icpay-x402-upto-submitted`** (`CustomEvent`, `bubbles`, `composed`) with **`detail: { paymentIntentId, amountUsdMax }`**. The progress bar listens for this to advance the “submit” step and either start **settlement loading + poll** (default) or show the **“authorization saved” banner + pending last step** when skipping wait (below).
+- **`x402UptoSkipSettlementWait?: boolean`** (pay button config, forwarded to **`<icpay-progress-bar .x402UptoSkipSettlementWait>`**):
+  - **`false` / omitted:** Poll `GET /sdk/public/payments/intents/:id` until terminal; then **`icpay-sdk-transaction-completed`** and **`onSuccess`**. Success copy uses **`paymentIntent.amountUsd`** when the API returns it (settled fiat after merchant settlement), not only the widget’s max cap.
+  - **`true`:** No poll after confirm. **`onSuccess`** runs with **`{ id: 0, status: 'authorized_pending_settlement', paymentIntentId }`**; pay button **`succeeded`** is set. Progress shows a green banner and keeps **Settlement** as **pending** (user can close). Fulfillment when the intent later completes: **webhooks** or **server-side** polling — not the widget poll.
+- Optional **`onX402UptoIntent`** on pay button config: invoked after confirm with **`paymentIntentId`**, cap **`amountUsd`**, **`accepts`**, **`paymentHeader`**, **`paymentRequirements`**, **`metadata`** — forward to your backend to start work / store the header.
+
+Example (React wrapper / same shape as plain `config` object):
+
+```tsx
+<IcpayPayButton
+  config={{
+    publishableKey: process.env.NEXT_PUBLIC_ICPAY_PK!,
+    amountUsd: 10,
+    x402Upto: true,
+    x402UptoSkipSettlementWait: true,
+    progressBar: { enabled: true },
+    onX402UptoIntent: async (info) => {
+      await fetch('/api/jobs/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentIntentId: info.paymentIntentId,
+          maxUsd: info.amountUsd,
+          paymentHeader: info.paymentHeader,
+          paymentRequirements: info.paymentRequirements,
+        }),
+      });
+    },
+  }}
+  onSuccess={(d) => {
+    if (d.status === 'authorized_pending_settlement') {
+      console.log('Header saved; settle with secret key later', d.paymentIntentId);
+    } else {
+      console.log('Completed', d);
+    }
+  }}
+/>
+```
+
+Docs: **icpay-docs** → [Agentic X402 up-to payments](https://docs.icpay.org/agentic-x402) (sections **Progress UI & optional skip settlement wait**, **Webhook: x402_upto_authorization_received**).
+
 **Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, `getAccountWalletBalances`, `getWalletsWithBalances`, etc.
 
 **Account and wallet balances (how to get balances):**
@@ -229,6 +280,10 @@ For payment success, prefer **`icpay-sdk-transaction-completed`** over `icpay-sd
 
 - **`icpay-sdk-onramp-intent-created`** — Emitted when an onramp-only flow creates an intent (e.g. Transak). Detail: `{ paymentIntentId, amountUsd?, onramp? }`. Useful for UI that shows “redirect to onramp” state.
 
+### Widget-only (window)
+
+- **`icpay-x402-upto-submitted`** — Fired by **`icpay-pay-button`** after EVM **up-to confirm** succeeds (not part of `@ic-pay/icpay-sdk`’s `icpay.on()` API). Listen with `window.addEventListener`. Detail: **`{ paymentIntentId: string, amountUsdMax: number }`**. Used by **`icpay-progress-bar`** together with **`x402UptoSkipSettlementWait`** to show “authorization saved” vs. advance to settlement polling. Custom apps can listen for the same milestone.
+
 ### Summary table
 
 | Event | When | Detail (main fields) |
@@ -243,6 +298,7 @@ For payment success, prefer **`icpay-sdk-transaction-completed`** over `icpay-sd
 | icpay-sdk-method-error | Method rejected | name, error |
 | icpay-sdk-error | Any SDK error | IcpayError-like |
 | icpay-sdk-onramp-intent-created | Onramp intent created | paymentIntentId, amountUsd?, onramp? |
+| icpay-x402-upto-submitted (window) | Pay button: EVM up-to confirm saved | paymentIntentId, amountUsdMax |
 
 ## Payment links
 
@@ -316,7 +372,7 @@ Use this when you are an AI agent that must **create the user, verify email, log
 
 8. **Use in the app**
    - **Publishable key:** Use with **icpay-widget** to build any frontend that accepts crypto payments (pay button, tip jar, paywall, etc.).
-   - **Secret key:** Use with **icpay-sdk** on the server for **protected** operations (e.g. `icpay.protected.getPaymentById`, `listPayments`, `getDetailedAccountInfo`) and to verify payment state. Alternatively (or in addition), register a **webhook** URL in the ICPay dashboard; verify `X-ICPay-Signature` and handle `payment.completed` and `payment.refunded` for fulfillment.
+   - **Secret key:** Use with **icpay-sdk** on the server for **protected** operations (e.g. `icpay.protected.getPaymentById`, `listPayments`, `getDetailedAccountInfo`) and to verify payment state. Alternatively (or in addition), register a **webhook** URL in the ICPay dashboard; verify `X-ICPay-Signature` and handle **`payment.completed`** and **`payment.refunded`** for fulfillment. For **X402 up-to**, also subscribe to **`x402_upto_authorization_received`** so your backend syncs when the signed header is stored (before `payment.completed`).
 
 9. **Other API endpoints (all require `Authorization: Bearer <access_token>`)**
    With the JWT from step 4, the agent can perform all account operations via the API without using icpay.org. Base URL: `https://api.icpay.org`. Send `Content-Type: application/json` where a body is used.
@@ -375,7 +431,7 @@ Use this when you are an AI agent that must **create the user, verify email, log
    - **Webhook endpoints**
      - `GET /user/webhook-endpoints?accountId=<uuid>` — List webhook endpoints.
      - `GET /user/webhook-endpoints/:id` — Get one endpoint.
-     - `POST /user/webhook-endpoints` — Create. Body: `CreateWebhookEndpointDto` — `endpointUrl`, `eventTypes` (array, e.g. `["payment.completed","payment.refunded"]`), optional `accountId`, `isActive`, `secretKey`, `description`, `retryCount`, `timeoutSeconds`, `headers`.
+     - `POST /user/webhook-endpoints` — Create. Body: `CreateWebhookEndpointDto` — `endpointUrl`, `eventTypes` (array, e.g. `["x402_upto_authorization_received","payment.completed","payment.refunded"]` for up-to flows), optional `accountId`, `isActive`, `secretKey`, `description`, `retryCount`, `timeoutSeconds`, `headers`.
      - `PUT /user/webhook-endpoints/:id` — Update. Body: `UpdateWebhookEndpointDto` (partial: `endpointUrl`, `eventTypes`, `isActive`, `description`, `retryCount`, `timeoutSeconds`, `headers`).
      - `DELETE /user/webhook-endpoints/:id` — Delete webhook endpoint.
      - `POST /user/webhook-endpoints/:id/test` — Send a test event to the endpoint.
@@ -430,7 +486,7 @@ Use this when you are the developer/user and want to register on icpay.org, crea
 
 - **Endpoint:** Merchant registers URL in ICPay dashboard; events posted to that URL.
 - **Security:** Verify `X-ICPay-Signature` = HMAC-SHA256(raw body, webhook secret) using constant-time compare. Reject if invalid.
-- **Payload:** JSON body; `event.type` e.g. `payment.completed`, `payment.failed`, `payment.refunded`. Use event/payment IDs for idempotency.
+- **Payload:** JSON body; `event.type` e.g. `payment.completed`, `payment.failed`, `payment.refunded`, **`x402_upto_authorization_received`** (X402 up-to: header saved on intent). Use event/payment IDs for idempotency.
 - **Retries:** Backoff and retries by backend; handle duplicate deliveries idempotently.
 
 ## Refunds
