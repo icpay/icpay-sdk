@@ -114,7 +114,7 @@ const tx = await icpay.createPaymentUsd({
     - Converts `settledAmountUsd` to token units using the ledger’s current USD price and decimals.
     - Enforces `0 < tokenAmount <= maxAmountRequired` (the authorized cap).
     - If `paymentHeader` is provided and not already stored, decodes and persists it (including `validBefore`) on the payment intent for icpay-services to consume.
-    - Triggers icpay-services to settle on-chain using the stored X402 authorization.
+    - Triggers icpay-services → `PaymentProcessor.payWithSignatureUpto` (EVM): EIP-3009 pull for the **signed max**, platform fee and splits on the **settled** token amount, **refund of unused cap** to the payer in the same tx (`PaymentProcessor` v1.3.0+).
   - Combine this pattern with `icpay.protected.getPaymentById` and/or webhooks when building **agentic** or **usage-based** payment flows.
 
 **Server (secret key):** Use for `icpay.protected.*`: `getPaymentById`, `listPayments`, `getPaymentHistory`, `getDetailedAccountInfo`, `getVerifiedLedgersPrivate`, `getAccountWalletBalances`, `getWalletsWithBalances`, etc.
