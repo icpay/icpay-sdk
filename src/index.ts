@@ -2531,7 +2531,21 @@ export class Icpay {
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
         x402Upto: Boolean((request as any).x402Upto),
+        x402Scheme:
+          ((request as any)?.x402Scheme === 'upto' || (request as any)?.x402Scheme === 'exact')
+            ? (request as any).x402Scheme
+            : (Boolean((request as any).x402Upto) ? 'upto' : 'exact'),
       };
+      try {
+        debugLog(this.config?.debug || false, 'x402 intent request body', {
+          tokenShortcode: body.tokenShortcode,
+          chainId: body.chainId,
+          amountUsd: body.amountUsd,
+          x402Upto: body.x402Upto,
+          x402Scheme: body.x402Scheme,
+          hasExistingIntentId: Boolean(body.paymentIntentId),
+        });
+      } catch {}
       if (existingIntentId) {
         body.paymentIntentId = existingIntentId;
       }
@@ -2592,6 +2606,15 @@ export class Icpay {
             // Prefer ledgerCanisterId from request/body; fallback to server response if present
             const acceptsArr: any[] = Array.isArray(data?.accepts) ? data.accepts : [];
             let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
+            try {
+              debugLog(this.config?.debug || false, 'x402 402 response parsed', {
+                paymentIntentId,
+                acceptsCount: acceptsArr.length,
+                firstScheme: acceptsArr[0]?.scheme || null,
+                firstNetwork: acceptsArr[0]?.network || null,
+                requestX402Upto: Boolean((request as any).x402Upto),
+              });
+            } catch {}
 
             if (requirement) {
               // Determine network once for error handling policy
@@ -3619,11 +3642,31 @@ export class Icpay {
                 this.emitMethodSuccess('createPaymentX402Usd', waited);
                 return waited;
               } catch (err) {
+                const isUptoNow =
+                  String((requirement as any)?.scheme || '').toLowerCase() === 'upto' ||
+                  Boolean((request as any).x402Upto);
                 // For Solana x402, do not silently fall back; surface the error so user can retry/sign
                 if (isSol) {
-                  throw (err instanceof IcpayError) ? err : new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'X402 Solana flow failed before signing', details: err });
+                  throw (err instanceof IcpayError)
+                    ? err
+                    : new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'X402 Solana flow failed before signing',
+                        details: err,
+                      });
                 }
-                // Non-Solana: fall through to notify-based wait if settle endpoint not available
+                // For upto EVM, also do not silently fall back to polling.
+                // If signing/settle fails here, caller must see the error rather than hang in pending.
+                if (isUptoNow) {
+                  throw (err instanceof IcpayError)
+                    ? err
+                    : new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'X402 upto flow failed before returning signed header',
+                        details: err,
+                      });
+                }
+                // Non-Solana exact flow: fall through to notify-based wait if settle endpoint is unavailable.
               }
             }
             // Fallback: wait until terminal via notify loop

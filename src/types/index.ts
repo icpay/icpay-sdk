@@ -728,6 +728,8 @@ export interface CreatePaymentUsdRequest {
   fiat_currency?: string;
   /** When true, create an x402 intent that uses the 'upto' scheme instead of 'exact'. */
   x402Upto?: boolean;
+  /** Optional explicit x402 scheme override. */
+  x402Scheme?: 'exact' | 'upto';
 }
 
 // Payments types
