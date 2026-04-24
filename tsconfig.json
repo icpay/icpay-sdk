@@ -13,6 +13,13 @@
     "declarationMap": true,
     "sourceMap": true,
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@icp-sdk/core/agent": ["node_modules/@icp-sdk/core/lib/cjs/agent"],
+      "@icp-sdk/core/principal": ["node_modules/@icp-sdk/core/lib/cjs/principal"],
+      "@icp-sdk/core/candid": ["node_modules/@icp-sdk/core/lib/cjs/candid"],
+      "@icp-sdk/auth/client": ["node_modules/@icp-sdk/auth/dist/esm/client/index.d.ts"]
+    },
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,

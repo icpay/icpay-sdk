@@ -1,9 +1,9 @@
-import type { Identity } from '@icp-sdk/core/lib/cjs/agent';
-import { Principal } from '@icp-sdk/core/lib/cjs/principal';
+import type { Identity } from '@icp-sdk/core/agent';
+import { Principal } from '@icp-sdk/core/principal';
 import { WalletProvider, WalletConnectionResult } from './types';
 import { IcpayError, createWalletError, ICPAY_ERROR_CODES } from './errors';
-import { HttpAgent } from '@icp-sdk/core/lib/cjs/agent';
-import { Actor } from '@icp-sdk/core/lib/cjs/agent';
+import { HttpAgent } from '@icp-sdk/core/agent';
+import { Actor } from '@icp-sdk/core/agent';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 
 // Type declarations for browser APIs
@@ -62,7 +62,7 @@ export class IcpayWallet {
   ];
 
   private async createAuthClient() {
-    const { AuthClient } = await import('@icp-sdk/auth/dist/esm/client/index.js');
+    const { AuthClient } = await import('@icp-sdk/auth/client');
     return new AuthClient();
   }
 
