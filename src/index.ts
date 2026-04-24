@@ -2684,6 +2684,24 @@ export class Icpay {
                   if (!this.icpayCanisterId) {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing ICPay canister id for IC x402' });
                   }
+                  // Plug requires target canisters to be authorized via requestConnect whitelist.
+                  // Without this preflight, approve may fail before wallet signing prompt appears.
+                  try {
+                    const w: any = (globalThis as any)?.window;
+                    if (w?.ic?.plug?.requestConnect) {
+                      const whitelist = [asset, this.icpayCanisterId].filter((v, i, arr) => !!v && arr.indexOf(v) === i);
+                      debugLog(this.config?.debug || false, 'x402 ic preflight plug requestConnect', {
+                        whitelist,
+                        host: this.icHost,
+                      });
+                      await w.ic.plug.requestConnect({ whitelist, host: this.icHost });
+                    }
+                  } catch (plugPreflightErr) {
+                    // Non-fatal: continue and let actor call report a concrete error if signing fails.
+                    debugLog(this.config?.debug || false, 'x402 ic plug preflight failed (continuing)', {
+                      error: (plugPreflightErr as any)?.message || String(plugPreflightErr),
+                    });
+                  }
                   // Fetch fee with anonymous agent so Oisy/signer only sees icrc2_approve (ICRC-21 supports
                   // icrc2_approve but not icrc1_fee – otherwise signer shows "UnsupportedCanisterCall: icrc1_fee")
                   let feeBn = 0n;
@@ -2696,6 +2714,14 @@ export class Icpay {
                   const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
+                    debugLog(this.config?.debug || false, 'x402 ic approve start', {
+                      paymentIntentId,
+                      asset,
+                      spender: this.icpayCanisterId,
+                      amount: amountBn.toString(),
+                      fee: feeBn.toString(),
+                      approveAmount: approveAmount.toString(),
+                    });
                     const approveResult: any = await ledgerActor.icrc2_approve({
                       fee: [],
                       memo: [],
@@ -2725,6 +2751,10 @@ export class Icpay {
                         details: approveResult,
                       });
                     }
+                    debugLog(this.config?.debug || false, 'x402 ic approve success', {
+                      paymentIntentId,
+                      hasOk,
+                    });
                   } catch (apprErr: any) {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'ICRC-2 approve failed', details: apprErr });
                   }
@@ -3713,6 +3743,9 @@ export class Icpay {
                 const isUptoNow =
                   String((requirement as any)?.scheme || '').toLowerCase() === 'upto' ||
                   Boolean((request as any).x402Upto);
+                const isIcNow =
+                  typeof (requirement as any)?.network === 'string' &&
+                  String((requirement as any).network).toLowerCase().startsWith('icp:');
                 // For Solana x402, do not silently fall back; surface the error so user can retry/sign
                 if (isSol) {
                   throw (err instanceof IcpayError)
@@ -3720,6 +3753,17 @@ export class Icpay {
                     : new IcpayError({
                         code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
                         message: 'X402 Solana flow failed before signing',
+                        details: err,
+                      });
+                }
+                // For IC exact flows, do not silently fall back to notify polling.
+                // If approve/settle fails, caller must see the wallet error.
+                if (isIcNow) {
+                  throw (err instanceof IcpayError)
+                    ? err
+                    : new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'X402 IC flow failed before approval/settlement',
                         details: err,
                       });
                 }
