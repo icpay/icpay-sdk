@@ -1,4 +1,4 @@
-import type { ActorSubclass } from '@icp-sdk/core/lib/cjs/agent';
+import type { ActorSubclass } from '@icp-sdk/core/agent';
 
 export interface IcpayConfig {
   // For public operations (frontend-safe)
