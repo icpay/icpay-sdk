@@ -2714,6 +2714,11 @@ export class Icpay {
                   const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
+                    debugLog(this.config?.debug || false, 'x402 ic actorProvider result', {
+                      actorType: (ledgerActor as any)?.constructor?.name || typeof ledgerActor,
+                      actorKeys: ledgerActor && typeof ledgerActor === 'object' ? Object.keys(ledgerActor as any).slice(0, 20) : undefined,
+                      hasApprove: typeof (ledgerActor as any)?.icrc2_approve === 'function',
+                    });
                     debugLog(this.config?.debug || false, 'x402 ic approve start', {
                       paymentIntentId,
                       asset,
@@ -2754,8 +2759,19 @@ export class Icpay {
                     debugLog(this.config?.debug || false, 'x402 ic approve success', {
                       paymentIntentId,
                       hasOk,
+                      approveResultType: approveResult?.constructor?.name || typeof approveResult,
+                      approveResultKeys: approveResult && typeof approveResult === 'object' ? Object.keys(approveResult) : undefined,
                     });
                   } catch (apprErr: any) {
+                    debugLog(this.config?.debug || false, 'x402 ic approve error', {
+                      paymentIntentId,
+                      message: apprErr?.message || String(apprErr),
+                      code: apprErr?.code,
+                      name: apprErr?.name,
+                      stack: apprErr?.stack,
+                      details: apprErr?.details,
+                      errKeys: apprErr && typeof apprErr === 'object' ? Object.keys(apprErr) : undefined,
+                    });
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'ICRC-2 approve failed', details: apprErr });
                   }
                   // Obtain payer principal if available
