@@ -1,6 +1,6 @@
-import type { Principal } from '@dfinity/principal';
-import type { ActorMethod } from '@dfinity/agent';
-import type { IDL } from '@dfinity/candid';
+import type { Principal } from '@icp-sdk/core/lib/cjs/principal';
+import type { ActorMethod } from '@icp-sdk/core/lib/cjs/agent';
+import type { IDL } from '@icp-sdk/core/lib/cjs/candid';
 
 export interface Account {
   'account_canister_id' : bigint,

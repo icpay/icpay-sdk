@@ -1,4 +1,4 @@
-import type { ActorSubclass } from '@dfinity/agent';
+import type { ActorSubclass } from '@icp-sdk/core/lib/cjs/agent';
 
 export interface IcpayConfig {
   // For public operations (frontend-safe)
@@ -112,7 +112,7 @@ export interface ConnectedWallet {
    * The principal of the wallet (Principal object format)
    * Alternative to owner property
    */
-  principal?: any; // Principal type from @dfinity/principal
+  principal?: any; // Principal type from @icp-sdk/core/principal
 
   /**
    * Whether the wallet is currently connected

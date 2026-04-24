@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.116",
+  "version": "1.4.117",
   "description": "Official ICPay SDK for multi-chain crypto payments (EVM, Solana, Internet Computer)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,10 +28,8 @@
   "author": "icpay",
   "license": "MIT",
   "dependencies": {
-    "@dfinity/agent": "^3.4.3",
-    "@dfinity/auth-client": "^3.4.3",
-    "@dfinity/candid": "^3.4.3",
-    "@dfinity/principal": "^3.4.3"
+    "@icp-sdk/auth": "^6.2.0",
+    "@icp-sdk/core": "^5.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.12.0",
