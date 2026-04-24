@@ -2696,7 +2696,7 @@ export class Icpay {
                   const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
-                    await ledgerActor.icrc2_approve({
+                    const approveResult: any = await ledgerActor.icrc2_approve({
                       fee: [],
                       memo: [],
                       from_subaccount: [],
@@ -2706,6 +2706,25 @@ export class Icpay {
                       expires_at: [],
                       spender: { owner: Principal.fromText(this.icpayCanisterId), subaccount: [] },
                     });
+                    const isObjectResult = approveResult && typeof approveResult === 'object';
+                    const hasErr = isObjectResult && Object.prototype.hasOwnProperty.call(approveResult, 'Err');
+                    const hasOk = isObjectResult && Object.prototype.hasOwnProperty.call(approveResult, 'Ok');
+                    if (hasErr) {
+                      throw new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'ICRC-2 approve was rejected by wallet/ledger',
+                        details: approveResult.Err,
+                      });
+                    }
+                    // Most ICRC ledgers return { Ok: blockIndex } | { Err: ... }.
+                    // Guard against unexpected/empty responses so we do not continue to settle/notify without approval.
+                    if (!hasOk && (approveResult === null || typeof approveResult === 'undefined')) {
+                      throw new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'ICRC-2 approve did not return a success result',
+                        details: approveResult,
+                      });
+                    }
                   } catch (apprErr: any) {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'ICRC-2 approve failed', details: apprErr });
                   }
