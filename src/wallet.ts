@@ -1,10 +1,9 @@
-import { AuthClient } from '@dfinity/auth-client';
-import { Identity } from '@dfinity/agent';
-import { Principal } from '@dfinity/principal';
+import type { Identity } from '@icp-sdk/core/lib/cjs/agent';
+import { Principal } from '@icp-sdk/core/lib/cjs/principal';
 import { WalletProvider, WalletConnectionResult } from './types';
 import { IcpayError, createWalletError, ICPAY_ERROR_CODES } from './errors';
-import { HttpAgent } from '@dfinity/agent';
-import { Actor } from '@dfinity/agent';
+import { HttpAgent } from '@icp-sdk/core/lib/cjs/agent';
+import { Actor } from '@icp-sdk/core/lib/cjs/agent';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
 
 // Type declarations for browser APIs
@@ -23,7 +22,12 @@ declare global {
 }
 
 export class IcpayWallet {
-  private authClient: AuthClient | null = null;
+  private authClient: {
+    isAuthenticated(): boolean;
+    getIdentity(): Promise<Identity>;
+    signIn(options?: { maxTimeToLive?: bigint; targets?: Principal[] }): Promise<Identity>;
+    logout(options?: { returnTo?: string }): Promise<void>;
+  } | null = null;
   private identity: Identity | null = null;
   private principal: Principal | null = null;
   private connectedProvider: string | null = null;
@@ -56,6 +60,11 @@ export class IcpayWallet {
       description: 'Plug wallet extension'
     }
   ];
+
+  private async createAuthClient() {
+    const { AuthClient } = await import('@icp-sdk/auth/dist/esm/client/index.js');
+    return new AuthClient();
+  }
 
   /**
    * Get available wallet providers
@@ -111,29 +120,20 @@ export class IcpayWallet {
    */
   private async connectInternetIdentity(): Promise<WalletConnectionResult> {
     // Initialize auth client
-    this.authClient = await AuthClient.create();
+    const authClient = await this.createAuthClient();
+    this.authClient = authClient;
 
     // Check if already authenticated
-    if (await this.authClient.isAuthenticated()) {
-      this.identity = this.authClient.getIdentity();
-      this.principal = this.identity.getPrincipal();
+    if (authClient.isAuthenticated()) {
+      const identity = await authClient.getIdentity();
+      this.identity = identity;
+      this.principal = identity.getPrincipal();
       this.connectedProvider = 'internet-identity';
     } else {
-      // Start authentication process
-      await new Promise<void>((resolve, reject) => {
-        this.authClient!.login({
-          identityProvider: 'https://identity.ic0.app',
-          onSuccess: () => {
-            this.identity = this.authClient!.getIdentity();
-            this.principal = this.identity.getPrincipal();
-            this.connectedProvider = 'internet-identity';
-            resolve();
-          },
-          onError: (error: string | undefined) => {
-            reject(new Error(`Authentication failed: ${error || 'Unknown error'}`));
-          },
-        });
-      });
+      const identity = await authClient.signIn();
+      this.identity = identity;
+      this.principal = identity.getPrincipal();
+      this.connectedProvider = 'internet-identity';
     }
 
     return {

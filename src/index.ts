@@ -17,10 +17,10 @@ import {
 import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
 import { IcpayEventCenter, IcpayEventName } from './events';
 import { IcpayWallet } from './wallet';
-import { HttpAgent, Actor } from '@dfinity/agent';
+import { HttpAgent, Actor } from '@icp-sdk/core/lib/cjs/agent';
 import { idlFactory as icpayIdl } from './declarations/icpay_canister_backend/icpay_canister_backend.did.js';
 import { idlFactory as ledgerIdl } from './declarations/icrc-ledger/ledger.did.js';
-import { Principal } from '@dfinity/principal';
+import { Principal } from '@icp-sdk/core/lib/cjs/principal';
 import { debugLog } from './utils';
 import { createProtectedApi, ProtectedApi } from './protected';
 import { HttpClient } from './http';
