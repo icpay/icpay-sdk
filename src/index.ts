@@ -2685,10 +2685,11 @@ export class Icpay {
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing ICPay canister id for IC x402' });
                   }
                   // Plug requires target canisters to be authorized via requestConnect whitelist.
-                  // Without this preflight, approve may fail before wallet signing prompt appears.
+                  // Only for Plug: if the user chose Oisy/II/NFID, opening Plug here is wrong and breaks the flow.
+                  const icWalletAdapter = String((this.config as any)?.icWalletAdapterId || '').toLowerCase();
                   try {
                     const w: any = (globalThis as any)?.window;
-                    if (w?.ic?.plug?.requestConnect) {
+                    if (icWalletAdapter === 'plug' && w?.ic?.plug?.requestConnect) {
                       const whitelist = [asset, this.icpayCanisterId].filter((v, i, arr) => !!v && arr.indexOf(v) === i);
                       debugLog(this.config?.debug || false, 'x402 ic preflight plug requestConnect', {
                         whitelist,
