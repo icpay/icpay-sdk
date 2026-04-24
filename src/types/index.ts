@@ -28,6 +28,12 @@ export interface IcpayConfig {
   actorProvider?: (canisterId: string, idl: any) => ActorSubclass<any>;
 
   /**
+   * Active IC wallet adapter id from the host (e.g. widget `lastWalletId`: `plug`, `oisy`, `ii`).
+   * Used so IC x402 Plug whitelist `requestConnect` runs only for Plug, not when the user chose Oisy/II.
+   */
+  icWalletAdapterId?: string;
+
+  /**
    * Optional: Enable debug logging
    * When set to true, all console.log messages will be output
    */
