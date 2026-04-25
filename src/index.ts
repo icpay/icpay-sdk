@@ -1130,7 +1130,7 @@ export class Icpay {
         try { debugLog(this.config.debug || false, 'solana tx error (prebuilt)', { message: e?.message }); } catch {}
         throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'Solana transaction failed', details: e });
       }
-      try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+      this.emitNotifyLedgerStageSuccess(params.paymentIntentId);
       // If relay already returned completed payload (paymentIntent + payment), skip notify and polling
       const relayPayload = typeof (relay as any)?.paymentIntent !== 'undefined' || typeof (relay as any)?.payment !== 'undefined' ? (relay as any) : undefined;
       const relayStatus = relayPayload && (typeof (relayPayload as any).status === 'string' ? (relayPayload as any).status : (relayPayload as any)?.paymentIntent?.status || (relayPayload as any)?.payment?.status || '');
@@ -1353,7 +1353,7 @@ export class Icpay {
     }
 
     // Notify API with tx hash and wait for terminal status
-    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId: params.paymentIntentId }); } catch {}
+    this.emitNotifyLedgerStageSuccess(params.paymentIntentId);
     // Inform API immediately with tx hash so it can start indexing
     try {
       await this.performNotifyPaymentIntent({ paymentIntentId: params.paymentIntentId, transactionId: txHash, maxAttempts: 1, icpayPaymentLink: params.metadata?.icpayPaymentLink });
@@ -1434,16 +1434,7 @@ export class Icpay {
   async getLedgerBalance(ledgerCanisterId: string): Promise<bigint> {
     this.emitMethodStart('getLedgerBalance', { ledgerCanisterId });
     try {
-      // Extract principal from connected wallet
-      let principal: string | null = null;
-
-      if (this.connectedWallet) {
-        if (this.connectedWallet.owner) {
-          principal = this.connectedWallet.owner;
-        } else if (this.connectedWallet.principal) {
-          principal = this.connectedWallet.principal;
-        }
-      }
+      const principal = this.getConnectedWalletPrincipal();
 
       if (!principal) {
         throw new Error('No principal available for balance check');
@@ -1495,6 +1486,36 @@ export class Icpay {
       memo >>= BigInt(8);
     }
     return new Uint8Array(out);
+  }
+
+  private getConnectedWalletPrincipal(): string | null {
+    const owner = this.connectedWallet?.owner;
+    if (owner != null && String(owner).trim() !== '') return String(owner);
+    const principal = this.connectedWallet?.principal;
+    if (principal != null && String(principal).trim() !== '') return String(principal);
+    return null;
+  }
+
+  private async resolvePayerPrincipal(): Promise<string | null> {
+    try {
+      const p = this.wallet.getPrincipal();
+      if (p) return p.toText();
+    } catch {}
+    try {
+      if (this.connectedWallet && typeof this.connectedWallet.getPrincipal === 'function') {
+        const maybe = await this.connectedWallet.getPrincipal();
+        if (typeof maybe === 'string' && maybe.trim() !== '') return maybe;
+      }
+    } catch {}
+    return this.getConnectedWalletPrincipal();
+  }
+
+  private emitNotifyLedgerStageStart(paymentIntentId: string): void {
+    try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+  }
+
+  private emitNotifyLedgerStageSuccess(paymentIntentId: string): void {
+    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
   }
 
   /**
@@ -1667,8 +1688,7 @@ export class Icpay {
               }
             }
             intentResp = { paymentIntent: pi, onramp: resolved.onramp };
-            expectedSenderPrincipal = (request as any).expectedSenderPrincipal ||
-              this.connectedWallet?.owner || this.connectedWallet?.principal?.toString();
+            expectedSenderPrincipal = (request as any).expectedSenderPrincipal || this.getConnectedWalletPrincipal();
           }
         }
         if (!intentResp) {
@@ -1676,10 +1696,7 @@ export class Icpay {
 
         // Resolve expected sender principal:
         // Start with any value explicitly provided on the request or via connectedWallet.
-        expectedSenderPrincipal =
-          (request as any).expectedSenderPrincipal ||
-          this.connectedWallet?.owner ||
-          this.connectedWallet?.principal?.toString();
+        expectedSenderPrincipal = (request as any).expectedSenderPrincipal || this.getConnectedWalletPrincipal();
         // If none yet and a Solana provider is present (e.g., Phantom), prefer its publicKey (base58).
         try {
           const solProv: any = (this.config as any)?.solanaProvider || (globalThis as any)?.solana;
@@ -2632,15 +2649,6 @@ export class Icpay {
             // Prefer ledgerCanisterId from request/body; fallback to server response if present
             const acceptsArr: any[] = Array.isArray(data?.accepts) ? data.accepts : [];
             let requirement: any = acceptsArr.length > 0 ? acceptsArr[0] : null;
-            try {
-              debugLog(this.config?.debug || false, 'x402 402 response parsed', {
-                paymentIntentId,
-                acceptsCount: acceptsArr.length,
-                firstScheme: acceptsArr[0]?.scheme || null,
-                firstNetwork: acceptsArr[0]?.network || null,
-                requestX402Upto: Boolean((request as any).x402Upto),
-              });
-            } catch {}
 
             if (requirement) {
               // Determine network once for error handling policy
@@ -2691,17 +2699,10 @@ export class Icpay {
                     const w: any = (globalThis as any)?.window;
                     if (icWalletAdapter === 'plug' && w?.ic?.plug?.requestConnect) {
                       const whitelist = [asset, this.icpayCanisterId].filter((v, i, arr) => !!v && arr.indexOf(v) === i);
-                      debugLog(this.config?.debug || false, 'x402 ic preflight plug requestConnect', {
-                        whitelist,
-                        host: this.icHost,
-                      });
                       await w.ic.plug.requestConnect({ whitelist, host: this.icHost });
                     }
-                  } catch (plugPreflightErr) {
+                  } catch {
                     // Non-fatal: continue and let actor call report a concrete error if signing fails.
-                    debugLog(this.config?.debug || false, 'x402 ic plug preflight failed (continuing)', {
-                      error: (plugPreflightErr as any)?.message || String(plugPreflightErr),
-                    });
                   }
                   // Fetch fee with anonymous agent so Oisy/signer only sees icrc2_approve (ICRC-21 supports
                   // icrc2_approve but not icrc1_fee – otherwise signer shows "UnsupportedCanisterCall: icrc1_fee")
@@ -2715,19 +2716,6 @@ export class Icpay {
                   const approveAmount = amountBn + (feeBn > 0n ? feeBn : 0n);
                   const ledgerActor = this.actorProvider(asset, ledgerIdl);
                   try {
-                    debugLog(this.config?.debug || false, 'x402 ic actorProvider result', {
-                      actorType: (ledgerActor as any)?.constructor?.name || typeof ledgerActor,
-                      actorKeys: ledgerActor && typeof ledgerActor === 'object' ? Object.keys(ledgerActor as any).slice(0, 20) : undefined,
-                      hasApprove: typeof (ledgerActor as any)?.icrc2_approve === 'function',
-                    });
-                    debugLog(this.config?.debug || false, 'x402 ic approve start', {
-                      paymentIntentId,
-                      asset,
-                      spender: this.icpayCanisterId,
-                      amount: amountBn.toString(),
-                      fee: feeBn.toString(),
-                      approveAmount: approveAmount.toString(),
-                    });
                     const approveResult: any = await ledgerActor.icrc2_approve({
                       fee: [],
                       memo: [],
@@ -2757,36 +2745,11 @@ export class Icpay {
                         details: approveResult,
                       });
                     }
-                    debugLog(this.config?.debug || false, 'x402 ic approve success', {
-                      paymentIntentId,
-                      hasOk,
-                      approveResultType: approveResult?.constructor?.name || typeof approveResult,
-                      approveResultKeys: approveResult && typeof approveResult === 'object' ? Object.keys(approveResult) : undefined,
-                    });
                   } catch (apprErr: any) {
-                    debugLog(this.config?.debug || false, 'x402 ic approve error', {
-                      paymentIntentId,
-                      message: apprErr?.message || String(apprErr),
-                      code: apprErr?.code,
-                      name: apprErr?.name,
-                      stack: apprErr?.stack,
-                      details: apprErr?.details,
-                      errKeys: apprErr && typeof apprErr === 'object' ? Object.keys(apprErr) : undefined,
-                    });
                     throw new IcpayError({ code: ICPAY_ERROR_CODES.TRANSACTION_FAILED, message: 'ICRC-2 approve failed', details: apprErr });
                   }
                   // Obtain payer principal if available
-                  let payerPrincipal: string | null = null;
-                  try {
-                    const p = this.wallet.getPrincipal();
-                    if (p) payerPrincipal = p.toText();
-                    else if (this.connectedWallet && typeof this.connectedWallet.getPrincipal === 'function') {
-                      const maybe = await this.connectedWallet.getPrincipal();
-                      if (typeof maybe === 'string') payerPrincipal = maybe;
-                    } else if (this.connectedWallet?.principal) {
-                      payerPrincipal = String(this.connectedWallet.principal);
-                    }
-                  } catch {}
+                  const payerPrincipal = await this.resolvePayerPrincipal();
                   // Build memo from accountCanisterId and intentCode for matching on services
                   let memoBytes: number[] | undefined = undefined;
                   try {
@@ -2971,7 +2934,7 @@ export class Icpay {
                         facilitatorPaysFee: true,
                       });
                       const sig = (relay && (relay as any).signature) || null;
-                      try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                      this.emitNotifyLedgerStageSuccess(paymentIntentId);
                       if (sig) {
                         try { await this.performNotifyPaymentIntent({ paymentIntentId, transactionId: sig, maxAttempts: 1, icpayPaymentLink: request.metadata?.icpayPaymentLink }); } catch {}
                       }
@@ -3561,7 +3524,7 @@ export class Icpay {
                           headerB64 = Buf ? Buf.from(headerJson, 'utf8').toString('base64') : (globalThis as any)?.btoa?.(headerJson) || '';
                         } catch { headerB64 = ''; }
                         if (headerB64) {
-                          try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                          this.emitNotifyLedgerStageStart(paymentIntentId);
                           const settleRespSol: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                             paymentIntentId,
                             paymentHeader: headerB64,
@@ -3650,7 +3613,7 @@ export class Icpay {
                     });
                   } catch {}
                   // Move to "Payment confirmation" stage (after relayer submission)
-                  try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                  this.emitNotifyLedgerStageSuccess(paymentIntentId);
                   const statusSol = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
                   const amountSol =
                     (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
@@ -3692,7 +3655,7 @@ export class Icpay {
                   return waitedSol;
                 }
                 // EVM: server-side settlement
-                try { this.emitMethodStart('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                this.emitNotifyLedgerStageStart(paymentIntentId);
                 const settleResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/settle', {
                   paymentIntentId,
                   paymentHeader,
@@ -3709,7 +3672,7 @@ export class Icpay {
                   });
                 } catch {}
                 // Move to "Payment confirmation" stage (confirm loading)
-                try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+                this.emitNotifyLedgerStageSuccess(paymentIntentId);
                 const status = (settleResp?.status || settleResp?.paymentIntent?.status || 'completed').toString().toLowerCase();
                 const amountStr =
                   (settleResp?.paymentIntent?.amount && String(settleResp.paymentIntent.amount)) ||
@@ -3855,7 +3818,7 @@ export class Icpay {
     let timer: any = null;
     let lastStatus: string | null = null;
     // Signal progress bar that canister notification/verification phase has effectively started
-    try { this.emitMethodSuccess('notifyLedgerTransaction', { paymentIntentId }); } catch {}
+    this.emitNotifyLedgerStageSuccess(paymentIntentId);
     const tick = async () => {
       const res = await this.performNotifyPaymentIntent({ paymentIntentId, orderId });
       const piStatus = ((res as any)?.paymentIntent?.status || '').toLowerCase();
