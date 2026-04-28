@@ -13,6 +13,8 @@ import {
   AccountPublic,
   LedgerPublic,
   SdkLedger,
+  PaymentIntentStreamSubscription,
+  PaymentIntentStreamUpdate,
 } from './types';
 import { IcpayError, createBalanceError, ICPAY_ERROR_CODES } from './errors';
 import { IcpayEventCenter, IcpayEventName } from './events';
@@ -323,6 +325,141 @@ export class Icpay {
       return resp;
     } catch (error) {
       this.emitMethodError('notifyPayment', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Subscribe to payment intent updates via Server-Sent Events (SSE).
+   * Falls back to existing polling flows when EventSource is unavailable.
+   */
+  subscribePaymentIntentStatus(params: {
+    paymentIntentId: string;
+    onUpdate: (update: PaymentIntentStreamUpdate) => void;
+    onError?: (error: unknown) => void;
+    intervalMs?: number;
+  }): PaymentIntentStreamSubscription {
+    const EventSourceCtor = (globalThis as any)?.EventSource;
+    if (!EventSourceCtor) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'EventSource is not available in this environment',
+      });
+    }
+    const paymentIntentId = String(params.paymentIntentId || '').trim();
+    if (!paymentIntentId) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'paymentIntentId is required',
+      });
+    }
+    const base = String(this.config.apiUrl || 'https://api.icpay.org').replace(/\/$/, '');
+    const url = new URL(
+      `${base}/sdk/public/payments/intents/${encodeURIComponent(paymentIntentId)}/stream`,
+    );
+    const pk = String(this.config.publishableKey || this.config.secretKey || '').trim();
+    if (pk) url.searchParams.set('publishableKey', pk);
+    if (params.intervalMs != null && Number.isFinite(Number(params.intervalMs))) {
+      url.searchParams.set('intervalMs', String(Math.max(1000, Number(params.intervalMs))));
+    }
+    let source: any = new EventSourceCtor(url.toString());
+    const handleUpdate = (event: any) => {
+      try {
+        const parsed = JSON.parse(String(event?.data || '{}'));
+        params.onUpdate(parsed as PaymentIntentStreamUpdate);
+      } catch (err) {
+        params.onError?.(err);
+      }
+    };
+    const handleError = (event: unknown) => {
+      params.onError?.(event);
+    };
+    source.addEventListener('payment_intent_update', handleUpdate);
+    source.addEventListener('error', handleError);
+    source.addEventListener('terminal', handleUpdate);
+    return {
+      close: () => {
+        if (source) {
+          try {
+            source.removeEventListener('payment_intent_update', handleUpdate);
+            source.removeEventListener('error', handleError);
+            source.removeEventListener('terminal', handleUpdate);
+            source.close();
+          } catch {}
+          source = null;
+        }
+      },
+    };
+  }
+
+  /**
+   * Convenience helper: wait until a payment intent reaches terminal status.
+   * Uses SSE stream first and automatically falls back to notify polling.
+   */
+  async waitForPaymentIntentCompletion(paymentIntentId: string): Promise<any> {
+    const intentId = String(paymentIntentId || '').trim();
+    if (!intentId) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'paymentIntentId is required',
+      });
+    }
+    this.emitMethodStart('waitForPaymentIntentCompletion', { paymentIntentId: intentId });
+    try {
+      const path = `/sdk/public/payments/intents/${encodeURIComponent(intentId)}`;
+      const fetched = this.config.publishableKey
+        ? await this.publicApiClient.getPublic(path, { publishableKey: this.config.publishableKey })
+        : await this.publicApiClient.get(path);
+      const intent = (fetched as any)?.paymentIntent || null;
+      const payment = (fetched as any)?.payment || null;
+      const currentStatus = (
+        intent?.status ||
+        payment?.status ||
+        ''
+      ).toString().toLowerCase();
+
+      if (
+        currentStatus === 'completed' ||
+        currentStatus === 'succeeded' ||
+        currentStatus === 'mismatched' ||
+        currentStatus === 'failed' ||
+        currentStatus === 'canceled' ||
+        currentStatus === 'cancelled'
+      ) {
+        const out = this.buildTerminalResponseFromNotify(
+          {
+            paymentIntentId: intentId,
+            ledgerCanisterId: String(intent?.ledgerCanisterId || payment?.ledgerCanisterId || ''),
+            amount: String(intent?.amount || payment?.amount || '0'),
+            metadata: intent?.metadata ?? {},
+          },
+          fetched,
+        );
+        if (currentStatus === 'failed' || currentStatus === 'canceled' || currentStatus === 'cancelled') {
+          out.status = 'failed';
+          this.emit('icpay-sdk-transaction-failed', out);
+        } else if (currentStatus === 'mismatched') {
+          const requested = payment?.requestedAmount || null;
+          const paid = payment?.paidAmount || null;
+          this.emit('icpay-sdk-transaction-mismatched', { ...out, requestedAmount: requested, paidAmount: paid });
+          this.emit('icpay-sdk-transaction-updated', { ...out, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
+        } else {
+          this.emit('icpay-sdk-transaction-completed', out);
+        }
+        this.emitMethodSuccess('waitForPaymentIntentCompletion', { paymentIntentId: intentId, status: out.status });
+        return out;
+      }
+
+      const waited = await this.awaitIntentTerminal({
+        paymentIntentId: intentId,
+        ledgerCanisterId: String(intent?.ledgerCanisterId || ''),
+        amount: String(intent?.amount || '0'),
+        metadata: intent?.metadata ?? {},
+      });
+      this.emitMethodSuccess('waitForPaymentIntentCompletion', { paymentIntentId: intentId, status: waited?.status });
+      return waited;
+    } catch (error) {
+      this.emitMethodError('waitForPaymentIntentCompletion', error);
       throw error;
     }
   }
@@ -3896,6 +4033,15 @@ export class Icpay {
   // when status is terminal. Never throws after funds are sent unless API reports
   // an explicit failure state.
   private async awaitIntentTerminal(params: { paymentIntentId: string; canisterTransactionId?: string; transactionId?: string; ledgerCanisterId: string; ledgerBlockIndex?: string | number; amount: string; metadata?: any; accountCanisterId?: number; externalCostAmount?: string | number; recipientPrincipal?: string }): Promise<any> {
+    const EventSourceCtor = (globalThis as any)?.EventSource;
+    if (EventSourceCtor && this.publicApiClient) {
+      try {
+        const viaSse = await this.awaitIntentTerminalViaSse(params, 180000);
+        if (viaSse) return viaSse;
+      } catch (e) {
+        debugLog(this.config.debug || false, 'sse wait failed; falling back to polling', e);
+      }
+    }
     const baseDelay = 1000;
     const maxDelay = 10000;
     let attempt = 0;
@@ -3960,6 +4106,88 @@ export class Icpay {
       const delay = Math.min(maxDelay, baseDelay * Math.ceil(attempt / 5));
       await new Promise(r => setTimeout(r, delay));
     }
+  }
+
+  private normalizeIntentStatusFromStream(update: any): string {
+    const status = update?.paymentIntent?.status || update?.payment?.status || update?.status || '';
+    return typeof status === 'string' ? status.toLowerCase() : '';
+  }
+
+  private buildTerminalResponseFromNotify(params: {
+    paymentIntentId: string;
+    canisterTransactionId?: string;
+    ledgerCanisterId: string;
+    amount: string;
+    metadata?: any;
+  }, resp: any): any {
+    const norm = this.normalizeIntentStatusFromStream(resp);
+    return {
+      transactionId: Number(params.canisterTransactionId || 0),
+      status: norm === 'succeeded' ? 'completed' : (norm as any),
+      amount: params.amount,
+      recipientCanister: params.ledgerCanisterId,
+      timestamp: new Date(),
+      description: 'Fund transfer',
+      metadata: params.metadata,
+      payment: resp,
+    };
+  }
+
+  private async awaitIntentTerminalViaSse(
+    params: {
+      paymentIntentId: string;
+      canisterTransactionId?: string;
+      transactionId?: string;
+      ledgerCanisterId: string;
+      ledgerBlockIndex?: string | number;
+      amount: string;
+      metadata?: any;
+      accountCanisterId?: number;
+      externalCostAmount?: string | number;
+      recipientPrincipal?: string;
+    },
+    timeoutMs: number,
+  ): Promise<any | null> {
+    return await new Promise((resolve) => {
+      let settled = false;
+      let sub: PaymentIntentStreamSubscription | null = null;
+      const finish = (value: any | null) => {
+        if (settled) return;
+        settled = true;
+        try {
+          sub?.close();
+        } catch {}
+        clearTimeout(timer);
+        resolve(value);
+      };
+      sub = this.subscribePaymentIntentStatus({
+        paymentIntentId: params.paymentIntentId,
+        onUpdate: (update) => {
+          const norm = this.normalizeIntentStatusFromStream(update);
+          if (norm === 'completed' || norm === 'succeeded' || norm === 'mismatched') {
+            const out = this.buildTerminalResponseFromNotify(params, update);
+            if (norm === 'mismatched') {
+              const requested = (update as any)?.payment?.requestedAmount || null;
+              const paid = (update as any)?.payment?.paidAmount || null;
+              this.emit('icpay-sdk-transaction-mismatched', { ...out, requestedAmount: requested, paidAmount: paid });
+              this.emit('icpay-sdk-transaction-updated', { ...out, status: 'mismatched', requestedAmount: requested, paidAmount: paid });
+            } else {
+              this.emit('icpay-sdk-transaction-completed', out);
+            }
+            finish(out);
+          } else if (norm === 'failed' || norm === 'canceled' || norm === 'cancelled') {
+            const out = this.buildTerminalResponseFromNotify(params, update);
+            out.status = 'failed';
+            this.emit('icpay-sdk-transaction-failed', out);
+            finish(out);
+          }
+        },
+        onError: () => {
+          finish(null);
+        },
+      });
+      const timer = setTimeout(() => finish(null), timeoutMs);
+    });
   }
 
     /**

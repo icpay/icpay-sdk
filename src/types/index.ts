@@ -749,3 +749,15 @@ export interface PaymentIntent {
   createdAt: string;
 }
 
+export interface PaymentIntentStreamUpdate {
+  paymentIntentId: string;
+  paymentIntentCode?: number | null;
+  paymentIntent: any;
+  payment: any;
+  onramp?: any;
+}
+
+export interface PaymentIntentStreamSubscription {
+  close: () => void;
+}
+
