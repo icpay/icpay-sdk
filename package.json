@@ -1,6 +1,6 @@
 {
   "name": "@ic-pay/icpay-sdk",
-  "version": "1.4.125",
+  "version": "1.4.126",
   "description": "Official ICPay SDK for multi-chain crypto payments (EVM, Solana, Internet Computer)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,13 +28,13 @@
   "author": "icpay",
   "license": "MIT",
   "dependencies": {
-    "@icp-sdk/auth": "^6.2.1",
+    "@icp-sdk/auth": "^6.2.2",
     "@icp-sdk/core": "^5.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
-    "@typescript-eslint/eslint-plugin": "^8.59.0",
-    "@typescript-eslint/parser": "^8.59.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.1",
+    "@typescript-eslint/parser": "^8.59.1",
     "eslint": "^9.39.4",
     "prettier": "^3.8.3",
     "typescript": "^5.9.3"
