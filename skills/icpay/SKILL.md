@@ -63,6 +63,12 @@ const tx = await icpay.createPaymentUsd({
 });
 ```
 
+**Wait for completion by payment intent id (SSE first, polling fallback):**
+
+```ts
+const final = await icpay.waitForPaymentIntentCompletion('pi_123');
+```
+
 **X402 v2 (IC, EVM, Solana):** Use `createPaymentX402Usd(request)` for sign-and-settle flows; SDK builds EIP-712 (EVM) or Solana message/transaction, sends to ICPay facilitator, returns terminal status. Fallback to regular `createPaymentUsd` when X402 not available. When you have an existing payment intent (e.g. from a pay link), pass **`paymentIntentId`** or **`paymentIntent`** in config or in the request so the SDK sends it to the x402 intent endpoint and the API reuses that intent instead of creating a second one.
 
 **X402 up-to (agentic / usage-based):**
@@ -268,7 +274,7 @@ Every SDK method that uses the internal emitter fires:
 - **`icpay-sdk-method-success`** — Method finished successfully. Detail: `{ name: string, result?: any }` (e.g. `name: 'createPayment'`, `result` is the return value or a summary).
 - **`icpay-sdk-method-error`** — Method threw. Detail: `{ name: string, error: any }`.
 
-Method names include: `notifyPayment`, `getAccountInfo`, `quoteAtxpRequest`, `payAtxpRequest`, `executeAtxpRequest`, `getVerifiedLedgers`, `getChains`, `getLedgerCanisterIdBySymbol`, `triggerTransactionSync`, `showWalletModal`, `connectWallet`, `getWalletProviders`, `isWalletProviderAvailable`, `getAccountAddress`, `getLedgerBalance`, `createPayment`, `createPaymentUsd`, `createPaymentX402Usd`, `pollTransactionStatus`, `notifyLedgerTransaction`, `getTransactionStatusPublic`, `sendFundsToLedger`, `getTransactionByFilter`, `getExternalWalletBalances`, `getSingleLedgerBalance`, `calculateTokenAmountFromUSD`, `getLedgerInfo`, `getAllLedgersWithPrices`, and protected API method names when using `icpay.protected.*`.
+Method names include: `notifyPayment`, `subscribePaymentIntentStatus`, `waitForPaymentIntentCompletion`, `getAccountInfo`, `quoteAtxpRequest`, `payAtxpRequest`, `executeAtxpRequest`, `getVerifiedLedgers`, `getChains`, `getLedgerCanisterIdBySymbol`, `triggerTransactionSync`, `showWalletModal`, `connectWallet`, `getWalletProviders`, `isWalletProviderAvailable`, `getAccountAddress`, `getLedgerBalance`, `createPayment`, `createPaymentUsd`, `createPaymentX402Usd`, `pollTransactionStatus`, `notifyLedgerTransaction`, `getTransactionStatusPublic`, `sendFundsToLedger`, `getTransactionByFilter`, `getExternalWalletBalances`, `getSingleLedgerBalance`, `calculateTokenAmountFromUSD`, `getLedgerInfo`, `getAllLedgersWithPrices`, and protected API method names when using `icpay.protected.*`.
 
 For payment success, prefer **`icpay-sdk-transaction-completed`** over `icpay-sdk-method-success` for `createPayment`/`createPaymentUsd`/`createPaymentX402Usd`, because the transaction-completed event carries the final payment state and is emitted at the right semantic time.
 
