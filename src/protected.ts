@@ -1,5 +1,5 @@
 import type { HttpClient } from './http';
-import { IcpayError } from './errors';
+import { ICPAY_ERROR_CODES, IcpayError } from './errors';
 import type {
   SdkPaymentAggregate,
   SdkPaymentIntent,
@@ -417,6 +417,15 @@ export function createProtectedApi(params: {
           settledAmountUsd: params.settledAmountUsd,
           ...(params.paymentHeader ? { paymentHeader: params.paymentHeader } : {}),
         });
+        if (res && typeof res.ok === 'boolean' && !res.ok) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.API_ERROR,
+            message: typeof res.error === 'string' && res.error.length > 0 ? res.error : 'x402 up-to settlement failed',
+            details: res,
+          });
+          emitError('settleX402Upto', err);
+          throw err;
+        }
         emitSuccess('settleX402Upto', {
           paymentIntentId: params.paymentIntentId,
           settledAmountUsd: params.settledAmountUsd,

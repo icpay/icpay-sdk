@@ -289,6 +289,23 @@ export class Icpay {
   }
 
   /**
+   * Settle an x402 “up to” payment intent to the final charged amount in USD.
+   * Requires `secretKey` (and matching `apiUrl`) in the constructor config; equivalent to `icpay.protected.settleX402Upto`.
+   */
+  async settleX402Upto(params: {
+    paymentIntentId: string;
+    settledAmountUsd: string | number;
+    paymentHeader?: string;
+  }): Promise<{
+    ok: boolean;
+    error?: string;
+    intentStatus?: string;
+    settledAmount?: string;
+  }> {
+    return this.protected.settleX402Upto(params);
+  }
+
+  /**
    * Notify ICPay to check status of a payment intent (public).
    */
   async notifyPayment(params: {
