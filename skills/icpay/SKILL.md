@@ -93,7 +93,7 @@ const final = await icpay.waitForPaymentIntentCompletion('pi_123');
     - `x402Init.payment.paymentRequirements` — the exact requirement used for signing (same shape as items in `accepts[]`).
   - Use this when you want the user/agent to sign a **maximum** budget but decide final cost later; **forward `paymentHeader` and `paymentIntentId` to your backend**.
 
-- Backend (secret key) settles later once the real cost in USD is known, via `protected.settleX402Upto`:
+- Backend (secret key) settles later once the real cost in USD is known, via **`icpay.settleX402Upto`** (or the same call on `icpay.protected.settleX402Upto`):
 
   ```ts
   const icpayBackend = new Icpay({
@@ -103,16 +103,13 @@ const final = await icpay.waitForPaymentIntentCompletion('pi_123');
 
   // After your service computes usageUsd (actual cost in fiat), ensuring it should not exceed the cap:
   // and has stored the signed header from the frontend (optional but recommended):
-  const result = await icpayBackend.protected.settleX402Upto({
+  await icpayBackend.settleX402Upto({
     paymentIntentId: 'pi_123',
     settledAmountUsd: usageUsd,
     // Optional: if you proxy the header, send it so icpay-api can persist it:
     // paymentHeader,
   });
-
-  if (!result.ok) {
-    // Handle failure; result.error contains reason
-  }
+  // Throws IcpayError if the API returns { ok: false } or a non-2xx response.
   ```
 
   - This hits `POST /sdk/payments/x402/upto/settle` on icpay-api, which:
@@ -128,7 +125,7 @@ const final = await icpay.waitForPaymentIntentCompletion('pi_123');
 - Emitted when **`POST /sdk/public/payments/intents/x402/upto/confirm`** succeeds (EVM, publishable key): ICPay persisted the signed X402 header on the intent.
 - **`event.type`:** `x402_upto_authorization_received`. **`data.object`:** payment-intent-shaped payload (`id` / `paymentIntentId`, `status`, `amount`, `amountUsd`, `ledgerCanisterId`, `payer`, `metadata`, `intentCode`, …) — see **icpay-docs** [Webhooks](https://docs.icpay.org/webhooks#event-x402-upto-authorization-received).
 - **Use this to sync your server** with the browser: do not rely only on `onX402UptoIntent` or `icpay-x402-upto-submitted` from the client. Especially with **`x402UptoSkipSettlementWait`**, the widget may not poll until `payment.completed`; this webhook is the **authoritative** signal that authorization is stored **before** settlement.
-- Still handle **`payment.completed`** for final fulfillment after `protected.settleX402Upto` and on-chain settlement.
+- Still handle **`payment.completed`** for final fulfillment after `settleX402Upto` and on-chain settlement.
 
 **Widget (`icpay-pay-button`) — X402 up-to progress and `x402UptoSkipSettlementWait`:**
 
