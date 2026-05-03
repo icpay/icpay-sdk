@@ -42,6 +42,12 @@ const tx = await sdk.createPaymentUsd({
 console.log('Payment status:', tx.status);
 ```
 
+### How `Icpay` reaches the backend
+
+`Icpay` is a typed client over the same **REST API** as the hosted app and **`@ic-pay/icpay-widget`**: it uses an internal `HttpClient` with `baseURL` from `config.apiUrl` (default `https://api.icpay.org`) and `Authorization: Bearer <publishableKey>` (or the secret key for server flows). Methods such as `createPaymentUsd` POST to `/sdk/public/payments/intents` on that host. There is no alternate “non-HTTP” path for creating intents.
+
+For **Solana**, you still pass `solanaProvider` so the SDK can attach the payer (`expectedSenderPrincipal`) and sign or relay the `transactionBase64` returned by the API—same contract as the embeddable widget.
+
 ## Supported chains
 
 - **EVM** — Base (and other EVM chains): native and ERC‑20; automatic chain switching/addition hints.
