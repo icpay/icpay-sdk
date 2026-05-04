@@ -3027,8 +3027,6 @@ export class Icpay {
                   }
                 }
                 if (isSol) {
-                  // Solana x402: follow standard flow (https://solana.com/developers/guides/getstarted/intro-to-x402)
-                  // — client signs transaction with signTransaction, then relay. No signMessage.
                   const solTxBase64: string | undefined = (requirement as any)?.extra?.transactionBase64;
                   const solMsgB58: string | undefined = (requirement as any)?.extra?.messageBase58;
                   const signableMsgB64: string | undefined = (requirement as any)?.extra?.signableMessageBase64;
@@ -3042,6 +3040,144 @@ export class Icpay {
                     try { const con = await (sol as any).connect({ onlyIfTrusted: false }); fromBase58 = con?.publicKey?.toBase58?.() || con?.publicKey || null; } catch {}
                   }
                   if (!fromBase58) throw new IcpayError({ code: ICPAY_ERROR_CODES.WALLET_NOT_CONNECTED, message: 'Solana wallet not connected' });
+                  if (isUpto) {
+                    // Solana up-to: do not auto-relay. Sign the x402 message and return deferred payload
+                    // so backend can confirm/store auth and later settle with secret key flow.
+                    if (!signableMsgB64) {
+                      throw new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'Solana x402 up-to requires signableMessageBase64 from facilitator',
+                      });
+                    }
+                    const msgBytes = u8FromBase64(signableMsgB64);
+                    let sigB64: string | null = null;
+                    // 1) Wallet Standard
+                    if (!sigB64 && (sol as any)?.request) {
+                      try {
+                        const r0: any = await (sol as any).request({ method: 'solana:signMessage', params: { message: msgBytes } });
+                        sigB64 = normalizeSolanaMessageSignature(r0) ?? sigB64;
+                      } catch {}
+                    }
+                    // 2) Native provider function
+                    if (!sigB64 && typeof (sol as any)?.signMessage === 'function') {
+                      try {
+                        const r1: any = await (sol as any).signMessage(msgBytes);
+                        sigB64 = normalizeSolanaMessageSignature(r1) ?? sigB64;
+                      } catch {}
+                    }
+                    // 3) Legacy request API
+                    if (!sigB64 && (sol as any)?.request) {
+                      try {
+                        const r2: any = await (sol as any).request({ method: 'signMessage', params: { message: msgBytes } });
+                        sigB64 = normalizeSolanaMessageSignature(r2) ?? sigB64;
+                      } catch {}
+                    }
+                    if (!sigB64) {
+                      throw new IcpayError({
+                        code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                        message: 'Solana x402 up-to message signature was not returned by wallet',
+                      });
+                    }
+                    const signatureBase58 = base58Encode(u8FromBase64(sigB64));
+                    const payerBase58 = String(fromBase58 || '');
+                    const fields: any = signableFields || {};
+                    const headerObj = {
+                      x402Version: Number(data?.x402Version || 2),
+                      network: String((requirement as any)?.network || ''),
+                      payer: payerBase58,
+                      signature: signatureBase58,
+                      payload: {
+                        authorization: {
+                          idHex: fields?.idHex || '',
+                          accountId: String(fields?.accountId || ''),
+                          maxAmount: String(fields?.amount || (requirement as any)?.maxAmountRequired || ''),
+                          externalCost: String(fields?.externalCost || '0'),
+                          validAfter: String(fields?.validAfter || '0'),
+                          validBefore: String(fields?.validBefore || '0'),
+                          nonceHex: String(fields?.nonceHex || ''),
+                        },
+                      },
+                    };
+                    const paymentHeader = b64FromBytes(new TextEncoder().encode(JSON.stringify(headerObj)));
+                    // Persist auth immediately so merchant can correlate intent and later settle/refund diff.
+                    await this.publicApiClient.post('/sdk/public/payments/intents/x402/upto/confirm', {
+                      paymentIntentId,
+                      paymentHeader,
+                      paymentRequirements: requirement,
+                    });
+                    // Capture max now (same behavior as EVM up-to in product terms: reserve/capture first, refund diff later).
+                    const relayResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                      paymentIntentId,
+                      signatureBase58,
+                      payerPublicKey: payerBase58,
+                      programId: String((requirement as any)?.payTo || ''),
+                      mint: String(ledgerCanisterId || ''),
+                      amount: String((fields?.amount || (requirement as any)?.maxAmountRequired || '0')),
+                      accountCanisterId: String(fields?.accountId || ''),
+                      intentCode: '',
+                      externalCostAmount: String(fields?.externalCost || '0'),
+                      validAfter: String(fields?.validAfter || '0'),
+                      validBefore: String(fields?.validBefore || '0'),
+                      nonceHex: String(fields?.nonceHex || ''),
+                      recipientAddress: String((request as any)?.recipientAddress || ''),
+                    });
+                    if (relayResp?.needsPayerSignature && relayResp?.transactionBase64) {
+                      let signedTxB64: string | null = null;
+                      try {
+                        const txBytes = u8FromBase64(String(relayResp.transactionBase64));
+                        if (typeof (sol as any).signTransaction === 'function') {
+                          const stx = await (sol as any).signTransaction(txBytes as any);
+                          signedTxB64 = normalizeSolanaSignedTransaction(stx) ?? signedTxB64;
+                        }
+                      } catch {}
+                      if (!signedTxB64 && (sol as any)?.request) {
+                        try {
+                          const r: any = await (sol as any).request({
+                            method: 'solana:signTransaction',
+                            params: { transaction: String(relayResp.transactionBase64) },
+                          });
+                          signedTxB64 = normalizeSolanaSignedTransaction(r) ?? signedTxB64;
+                        } catch {}
+                      }
+                      if (!signedTxB64) {
+                        throw new IcpayError({
+                          code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                          message: 'Wallet did not return signed Solana transaction for x402 up-to capture',
+                        });
+                      }
+                      await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
+                        paymentIntentId,
+                        signedTransactionBase64: signedTxB64,
+                      });
+                    }
+                    const deferred = {
+                      transactionId: 0,
+                      status: 'pending',
+                      amount:
+                        (acceptsArr[0]?.maxAmountRequired || request.usdAmount)?.toString?.() ||
+                        String(request.usdAmount),
+                      recipientCanister: ledgerCanisterId,
+                      timestamp: new Date(),
+                      metadata: {
+                        ...(request.metadata || {}),
+                        icpay_x402: true,
+                        icpay_x402_upto: true,
+                        icpay_network: 'sol',
+                      },
+                      paymentIntentId,
+                      payment: {
+                        x402Version: data?.x402Version,
+                        paymentIntentId,
+                        accepts: acceptsArr,
+                        paymentHeader,
+                        paymentRequirements: requirement,
+                      },
+                    } as any;
+                    this.emitMethodSuccess('createPaymentX402Usd', deferred);
+                    return deferred;
+                  }
+                  // Solana x402: follow standard flow (https://solana.com/developers/guides/getstarted/intro-to-x402)
+                  // — client signs transaction with signTransaction, then relay. No signMessage.
                   // Standard x402: when server provided unsigned tx, sign it and relay (no signMessage)
                   if (solTxBase64 && solTxBase64.length > 0) {
                     if (typeof (sol as any)?.connect === 'function') {
