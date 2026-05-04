@@ -202,6 +202,10 @@ export interface CreateTransactionRequest {
   };
   /** Fiat currency for display: id or code (e.g. USD). Defaults to USD if missing. */
   fiat_currency?: string;
+  /** When true (or x402Scheme === 'upto'), intent is created as x402 up-to (secret settle). Forwarded to POST /sdk/public/payments/intents. */
+  x402Upto?: boolean;
+  /** Optional explicit x402 scheme; upto implies x402Upto. */
+  x402Scheme?: 'exact' | 'upto';
   /**
    * Optional: Pre-resolved payment intent (e.g. from icpay-widget). When set, SDK uses this
    * instead of creating a new intent. Can be full ResolvedPaymentIntentLike or { id: string } to fetch.
