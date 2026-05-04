@@ -1931,6 +1931,16 @@ export class Icpay {
               fiat_currency: (request as any)?.fiat_currency,
             });
           } else {
+            const reqAnyCreate = request as any;
+            const uptoFromReq =
+              Boolean(reqAnyCreate?.x402Upto) ||
+              String(reqAnyCreate?.x402Scheme || '').toLowerCase() === 'upto';
+            const schemeFromReq =
+              reqAnyCreate?.x402Scheme === 'upto' || reqAnyCreate?.x402Scheme === 'exact'
+                ? reqAnyCreate.x402Scheme
+                : uptoFromReq
+                  ? 'upto'
+                  : undefined;
             intentResp = await this.publicApiClient.post('/sdk/public/payments/intents', {
               amount: (typeof request.amount === 'string' ? request.amount : (request.amount != null ? String(request.amount) : undefined)),
               // Prefer tokenShortcode if provided
@@ -1949,6 +1959,12 @@ export class Icpay {
               recipientAddresses: (request as any)?.recipientAddresses || undefined,
               externalCostAmount: (request as any)?.externalCostAmount ?? (request as any)?.metadata?.externalCostAmount ?? undefined,
               fiat_currency: (request as any)?.fiat_currency,
+              ...(uptoFromReq || reqAnyCreate?.x402Upto != null
+                ? {
+                    x402Upto: uptoFromReq,
+                    ...(schemeFromReq ? { x402Scheme: schemeFromReq } : {}),
+                  }
+                : {}),
             });
           }
         }
@@ -2648,6 +2664,11 @@ export class Icpay {
         recipientAddress: (request as any)?.recipientAddress || '0x0000000000000000000000000000000000000000',
         recipientAddresses: (request as any)?.recipientAddresses,
         fiat_currency: (request as any)?.fiat_currency ?? (request as any)?.fiatCurrency ?? (this.config as any)?.fiat_currency,
+        x402Upto: Boolean((request as any).x402Upto),
+        x402Scheme:
+          (request as any)?.x402Scheme === 'upto' || (request as any)?.x402Scheme === 'exact'
+            ? (request as any).x402Scheme
+            : undefined,
       } as any;
 
       const res = await this.createPayment(createTransactionRequest);
