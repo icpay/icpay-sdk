@@ -1471,6 +1471,11 @@ export class Icpay {
         debugLog(this.config.debug || false, 'evm native tx', { to: contractAddress, from: owner, dataLen: dataWithAttribution.length, value: amountHex, recipient });
         txHash = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: contractAddress, data: dataWithAttribution, value: amountHex }] });
       } else {
+        const externalCostStr = (params.request as any)?.__externalCostAmount;
+        const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
+        // payERC20 pulls params.amount + externalCost from the payer’s balance; approve must cover both.
+        const totalErc20Pull = params.amount + externalCost;
+
         // Ensure allowance(owner -> spender=contractAddress)
         const allowanceSelector = '0xdd62ed3e'; // allowance(address,address)
         const approveSelector = '0x095ea7b3';   // approve(address,uint256)
@@ -1480,17 +1485,15 @@ export class Icpay {
         if (typeof allowanceHex === 'string' && allowanceHex.startsWith('0x')) {
           const allowance = BigInt(allowanceHex);
           debugLog(this.config.debug || false, 'evm erc20 allowance result', { allowance: allowance.toString() });
-          if (allowance < params.amount) {
-            const approveData = approveSelector + toAddressPadded(contractAddress) + toUint256(params.amount);
+          if (allowance < totalErc20Pull) {
+            const approveData = approveSelector + toAddressPadded(contractAddress) + toUint256(totalErc20Pull);
             const approveDataWithAttribution = appendBaseBuilderSuffixIfNeeded(currentChainId, approveData);
-            debugLog(this.config.debug || false, 'evm erc20 approve', { to: tokenAddress, from: owner, dataLen: approveDataWithAttribution.length, amount: params.amount.toString() });
+            debugLog(this.config.debug || false, 'evm erc20 approve', { to: tokenAddress, from: owner, dataLen: approveDataWithAttribution.length, amount: totalErc20Pull.toString() });
             const approveTx = await eth.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: String(tokenAddress), data: approveDataWithAttribution }] });
             debugLog(this.config.debug || false, 'evm erc20 approve sent', { tx: approveTx });
             await waitForReceipt(approveTx, 90, 1000);
           }
         }
-        const externalCostStr = (params.request as any)?.__externalCostAmount;
-        const externalCost = externalCostStr != null && externalCostStr !== '' ? BigInt(String(externalCostStr)) : 0n;
         const extSel = selector.payERC20;
         if (!extSel) {
           throw new IcpayError({ code: ICPAY_ERROR_CODES.INVALID_CONFIG, message: 'Missing payERC20 selector from API; update API/chain metadata.' });
