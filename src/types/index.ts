@@ -718,6 +718,8 @@ export interface LedgerInfo {
 
 export interface CreatePaymentUsdRequest {
   usdAmount: string | number;
+  /** When set, POST /intents/x402 reuses this intent instead of creating a new one. */
+  paymentIntentId?: string;
   ledgerCanisterId?: string;
   symbol?: string;
   tokenShortcode?: string;
