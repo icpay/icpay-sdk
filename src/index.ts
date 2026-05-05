@@ -2063,6 +2063,55 @@ export class Icpay {
       }
       debugLog(this.config.debug || false, 'memo', { memo, accountCanisterId, paymentIntentCode });
 
+      // Solana x402 **up-to** must NOT use `processSolanaPayment` + prebuilt `transactionBase64`:
+      // that path relays a full capture immediately and never stores the signed message header for
+      // secret-key `settleX402Upto`. Reuse the dedicated x402 flow (signMessage + upto/confirm + defer).
+      const chainNormX402 = String(intentChainType || '').toLowerCase();
+      const reqX402: any = request as any;
+      const intentPi: any = intentResp?.paymentIntent;
+      const intentUpto = Boolean(intentPi?.x402Upto);
+      const isSolX402Upto =
+        (chainNormX402 === 'sol' || chainNormX402 === 'solana') &&
+        !!paymentIntentId &&
+        (Boolean(reqX402?.x402Upto) ||
+          String(reqX402?.x402Scheme || '').toLowerCase() === 'upto' ||
+          intentUpto);
+      if (isSolX402Upto) {
+        const rawUsd = reqX402.amountUsd;
+        const usdAmountNum =
+          typeof rawUsd === 'string' ? parseFloat(rawUsd) : Number(rawUsd);
+        if (!Number.isFinite(usdAmountNum)) {
+          const err = new IcpayError({
+            code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+            message: 'Solana x402 up-to requires amountUsd on the payment request',
+            details: { paymentIntentId, request },
+          });
+          this.emitMethodError('createPayment', err);
+          throw err;
+        }
+        const x402UsdReq: CreatePaymentUsdRequest = {
+          usdAmount: usdAmountNum,
+          tokenShortcode: reqX402.tokenShortcode,
+          symbol: reqX402.symbol,
+          ledgerCanisterId: reqX402.ledgerCanisterId ?? ledgerCanisterId,
+          description: reqX402.description,
+          accountCanisterId: reqX402.accountCanisterId,
+          metadata: reqX402.metadata,
+          onrampPayment: reqX402.onrampPayment,
+          widgetParams: reqX402.widgetParams,
+          externalCostAmount: reqX402.externalCostAmount,
+          recipientAddress: reqX402.recipientAddress,
+          recipientAddresses: reqX402.recipientAddresses,
+          fiat_currency: reqX402.fiat_currency ?? reqX402.fiatCurrency,
+          x402Upto: true,
+          x402Scheme: 'upto',
+          paymentIntentId: paymentIntentId!,
+        };
+        const finalResponse = await this.createPaymentX402Usd(x402UsdReq);
+        this.emitMethodSuccess('createPayment', finalResponse);
+        return finalResponse;
+      }
+
       // Delegate to chain-specific processing
       const finalResponse = await this.processPaymentByChain({
         chainType: intentChainType,
@@ -2791,10 +2840,20 @@ export class Icpay {
 
       try {
         const resp: any = await this.publicApiClient.post('/sdk/public/payments/intents/x402', body);
+        const isUptoReq =
+          Boolean((request as any).x402Upto) ||
+          String((request as any)?.x402Scheme || '').toLowerCase() === 'upto';
         // If backend indicates x402 is unavailable (failed + fallback), immediately switch to normal flow
         const respStatus = (resp?.status || '').toString().toLowerCase();
         const fallbackSuggested = Boolean(resp?.fallbackSuggested);
         if (respStatus === 'failed' && fallbackSuggested) {
+          if (isUptoReq) {
+            throw new IcpayError({
+              code: ICPAY_ERROR_CODES.API_ERROR,
+              message: 'x402 facilitator declined up-to intent; falling back to non-x402 payment is not supported for up-to',
+              details: resp,
+            });
+          }
           const fallback = await this.createPaymentUsd(request);
           this.emitMethodSuccess('createPaymentX402Usd', fallback);
           return fallback;
@@ -2802,6 +2861,13 @@ export class Icpay {
         // If backend returned normal flow (no accepts), skip x402 and proceed with regular flow
         const hasAccepts = Array.isArray(resp?.accepts) && resp.accepts.length > 0;
         if (!hasAccepts) {
+          if (isUptoReq) {
+            throw new IcpayError({
+              code: ICPAY_ERROR_CODES.API_ERROR,
+              message: 'x402 response missing accepts for up-to intent',
+              details: resp,
+            });
+          }
           const fallback = await this.createPaymentUsd(request);
           this.emitMethodSuccess('createPaymentX402Usd', fallback);
           return fallback;
