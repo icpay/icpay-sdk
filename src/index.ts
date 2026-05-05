@@ -3129,51 +3129,8 @@ export class Icpay {
                       paymentHeader,
                       paymentRequirements: requirement,
                     });
-                    // Capture max now (same behavior as EVM up-to in product terms: reserve/capture first, refund diff later).
-                    const relayResp: any = await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
-                      paymentIntentId,
-                      signatureBase58,
-                      payerPublicKey: payerBase58,
-                      programId: String((requirement as any)?.payTo || ''),
-                      mint: String(ledgerCanisterId || ''),
-                      amount: String((fields?.amount || (requirement as any)?.maxAmountRequired || '0')),
-                      accountCanisterId: String(fields?.accountId || ''),
-                      intentCode: '',
-                      externalCostAmount: String(fields?.externalCost || '0'),
-                      validAfter: String(fields?.validAfter || '0'),
-                      validBefore: String(fields?.validBefore || '0'),
-                      nonceHex: String(fields?.nonceHex || ''),
-                      recipientAddress: String((request as any)?.recipientAddress || ''),
-                    });
-                    if (relayResp?.needsPayerSignature && relayResp?.transactionBase64) {
-                      let signedTxB64: string | null = null;
-                      try {
-                        const txBytes = u8FromBase64(String(relayResp.transactionBase64));
-                        if (typeof (sol as any).signTransaction === 'function') {
-                          const stx = await (sol as any).signTransaction(txBytes as any);
-                          signedTxB64 = normalizeSolanaSignedTransaction(stx) ?? signedTxB64;
-                        }
-                      } catch {}
-                      if (!signedTxB64 && (sol as any)?.request) {
-                        try {
-                          const r: any = await (sol as any).request({
-                            method: 'solana:signTransaction',
-                            params: { transaction: String(relayResp.transactionBase64) },
-                          });
-                          signedTxB64 = normalizeSolanaSignedTransaction(r) ?? signedTxB64;
-                        } catch {}
-                      }
-                      if (!signedTxB64) {
-                        throw new IcpayError({
-                          code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
-                          message: 'Wallet did not return signed Solana transaction for x402 up-to capture',
-                        });
-                      }
-                      await this.publicApiClient.post('/sdk/public/payments/x402/relay', {
-                        paymentIntentId,
-                        signedTransactionBase64: signedTxB64,
-                      });
-                    }
+                    // EVM-aligned up-to lifecycle:
+                    // after confirm, defer on-chain settlement to secret-key settleX402Upto only.
                     const deferred = {
                       transactionId: 0,
                       status: 'pending',
