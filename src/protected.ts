@@ -48,6 +48,8 @@ export type ProtectedApi = {
     error?: string;
     intentStatus?: string;
     settledAmount?: string;
+    refundAmount?: string;
+    signature?: string | null;
   }>;
 };
 
@@ -405,6 +407,8 @@ export function createProtectedApi(params: {
       error?: string;
       intentStatus?: string;
       settledAmount?: string;
+      refundAmount?: string;
+      signature?: string | null;
     }> {
       requireSecretKey('settleX402Upto');
       emitStart('settleX402Upto', {
@@ -412,11 +416,16 @@ export function createProtectedApi(params: {
         settledAmountUsd: params.settledAmountUsd,
       });
       try {
-        const res: any = await privateApiClient!.post('/sdk/payments/x402/upto/settle', {
+        const baseBody: Record<string, unknown> = {
           paymentIntentId: params.paymentIntentId,
           settledAmountUsd: params.settledAmountUsd,
           ...(params.paymentHeader ? { paymentHeader: params.paymentHeader } : {}),
-        });
+        };
+        const res: any = await privateApiClient!.post(
+          '/sdk/payments/x402/upto/settle',
+          baseBody,
+        );
+
         if (res && typeof res.ok === 'boolean' && !res.ok) {
           const err = new IcpayError({
             code: ICPAY_ERROR_CODES.API_ERROR,
@@ -435,6 +444,8 @@ export function createProtectedApi(params: {
           error?: string;
           intentStatus?: string;
           settledAmount?: string;
+          refundAmount?: string;
+          signature?: string | null;
         };
       } catch (error) {
         emitError('settleX402Upto', error);
