@@ -301,6 +301,8 @@ export class Icpay {
     error?: string;
     intentStatus?: string;
     settledAmount?: string;
+    refundAmount?: string;
+    signature?: string | null;
   }> {
     return this.protected.settleX402Upto(params);
   }
@@ -3190,11 +3192,56 @@ export class Icpay {
                     };
                     const paymentHeader = b64FromBytes(new TextEncoder().encode(JSON.stringify(headerObj)));
                     // Persist auth immediately so merchant can correlate intent and later settle/refund diff.
-                    await this.publicApiClient.post('/sdk/public/payments/intents/x402/upto/confirm', {
-                      paymentIntentId,
-                      paymentHeader,
-                      paymentRequirements: requirement,
-                    });
+                    const confirmOut: any = await this.publicApiClient.post(
+                      '/sdk/public/payments/intents/x402/upto/confirm',
+                      {
+                        paymentIntentId,
+                        paymentHeader,
+                        paymentRequirements: requirement,
+                      },
+                    );
+                    // SPL delegate approve (vault PDA) so merchant-only secret settle can submit on-chain like EVM.
+                    const delB64 = String(confirmOut?.delegateSetupTransactionBase64 || '').trim();
+                    if (delB64) {
+                      let signedDel: string | null = null;
+                      let rd: any = null;
+                      if ((sol as any)?.request) {
+                        try {
+                          rd = await (sol as any).request({
+                            method: 'signTransaction',
+                            params: { transaction: delB64 },
+                          });
+                        } catch {}
+                        signedDel = normalizeSolanaSignedTransaction(rd);
+                        if (!signedDel) {
+                          try {
+                            rd = await (sol as any).request({
+                              method: 'solana:signTransaction',
+                              params: { transaction: delB64 },
+                            });
+                          } catch {}
+                          signedDel = normalizeSolanaSignedTransaction(rd);
+                        }
+                      }
+                      if (!signedDel && typeof (sol as any).signTransaction === 'function') {
+                        try {
+                          const txBytes = u8FromBase64(delB64);
+                          const stx = await (sol as any).signTransaction(txBytes as any);
+                          signedDel = normalizeSolanaSignedTransaction(stx);
+                        } catch {}
+                      }
+                      if (!signedDel) {
+                        throw new IcpayError({
+                          code: ICPAY_ERROR_CODES.TRANSACTION_FAILED,
+                          message:
+                            'Solana x402 up-to: wallet did not sign the vault-delegate approve transaction returned by the API',
+                        });
+                      }
+                      await this.publicApiClient.post('/sdk/public/payments/solana/relay', {
+                        signedTransactionBase64: signedDel,
+                        paymentIntentId,
+                      });
+                    }
                     // EVM-aligned up-to lifecycle:
                     // after confirm, defer on-chain settlement to secret-key settleX402Upto only.
                     const deferred = {
