@@ -376,8 +376,14 @@ export class Icpay {
     const url = new URL(
       `${base}/sdk/public/payments/intents/${encodeURIComponent(paymentIntentId)}/stream`,
     );
-    const pk = String(this.config.publishableKey || this.config.secretKey || '').trim();
-    if (pk) url.searchParams.set('publishableKey', pk);
+    const publishableKey = String(this.config.publishableKey || '').trim();
+    if (!publishableKey) {
+      throw new IcpayError({
+        code: ICPAY_ERROR_CODES.INVALID_CONFIG,
+        message: 'publishableKey is required for payment intent stream subscription',
+      });
+    }
+    url.searchParams.set('publishableKey', publishableKey);
     if (params.intervalMs != null && Number.isFinite(Number(params.intervalMs))) {
       url.searchParams.set('intervalMs', String(Math.max(1000, Number(params.intervalMs))));
     }

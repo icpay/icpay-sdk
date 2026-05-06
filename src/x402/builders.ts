@@ -168,13 +168,13 @@ export async function buildAndSignX402PaymentHeader(
         else {
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const nodeCrypto = typeof require === 'function' ? require('crypto') : null;
-          nonceBytes = nodeCrypto?.randomBytes ? nodeCrypto.randomBytes(32) : nonceBytes;
           if (!nodeCrypto?.randomBytes) {
-            for (let i = 0; i < nonceBytes.length; i++) nonceBytes[i] = Math.floor(Math.random() * 256);
+            throw new Error('Secure randomness unavailable in this runtime');
           }
+          nonceBytes = nodeCrypto.randomBytes(32);
         }
       } catch {
-        for (let i = 0; i < nonceBytes.length; i++) nonceBytes[i] = Math.floor(Math.random() * 256);
+        throw new Error('Secure randomness unavailable in this runtime');
       }
       const nonceHex = '0x' + Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join('');
       // Build id = pack(accountId (u64, big-endian) into high 8 bytes, intentCode (u32 big-endian) into low 4 bytes)
@@ -355,18 +355,13 @@ export async function buildAndSignX402PaymentHeader(
       // Try Node crypto for non-browser environments
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const nodeCrypto = typeof require === 'function' ? require('crypto') : null;
-      nonceBytes = nodeCrypto?.randomBytes ? nodeCrypto.randomBytes(32) : new Uint8Array(32);
       if (!nodeCrypto?.randomBytes) {
-        for (let i = 0; i < nonceBytes.length; i++) {
-          nonceBytes[i] = Math.floor(Math.random() * 256);
-        }
+        throw new Error('Secure randomness unavailable in this runtime');
       }
+      nonceBytes = nodeCrypto.randomBytes(32);
     }
   } catch {
-    nonceBytes = new Uint8Array(32);
-    for (let i = 0; i < nonceBytes.length; i++) {
-      nonceBytes[i] = Math.floor(Math.random() * 256);
-    }
+    throw new Error('Secure randomness unavailable in this runtime');
   }
   const bytesArr: number[] = Array.from(nonceBytes as Uint8Array);
   const nonce = '0x' + bytesArr.map(b => b.toString(16).padStart(2, '0')).join('');
